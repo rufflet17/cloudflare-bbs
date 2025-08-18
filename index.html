@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cloudflare BBS</title>
+  <style>
+    body { font-family: 'MS PGothic', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif; background-color: #efefef; color: #333; }
+    header { background-color: #ddd; padding: 10px; text-align: center; }
+    main { max-width: 800px; margin: 20px auto; background-color: #fff; padding: 20px; border: 1px solid #ccc; }
+    h2, h3 { border-bottom: 2px solid #99c; }
+    form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+    input, textarea { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; }
+    button { padding: 10px; background-color: #007bff; color: white; border: none; cursor: pointer; border-radius: 4px; }
+    button:hover { background-color: #0056b3; }
+    #thread-list .thread-item { cursor: pointer; padding: 10px; border-bottom: 1px dotted #ccc; display: flex; justify-content: space-between; align-items: center; }
+    #thread-list .thread-item:hover { background-color: #f0f8ff; }
+    .thread-details { flex-grow: 1; }
+    .thread-meta { font-size: 0.8em; color: #666; text-align: right; white-space: nowrap; }
+    .post { margin-bottom: 15px; }
+    .post-header { font-size: 0.9em; color: #006400; font-weight: bold; }
+    .post-header .post-date { color: #555; font-weight: normal; margin-left: 10px; }
+    .post-body { margin-left: 1em; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+    #back-to-list-btn { margin-bottom: 15px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Cloudflare BBS</h1>
+  </header>
+
+  <main>
+    <div id="thread-list-view">
+      <h2>スレッド一覧</h2>
+      <div id="thread-list"></div>
+      <hr>
+      <h3>新しいスレッドを立てる</h3>
+      <form id="new-thread-form">
+        <input type="text" id="new-thread-title" placeholder="スレッドタイトル" required>
+        <input type="text" id="new-thread-author" placeholder="名前 (省略可)">
+        <textarea id="new-thread-body" placeholder="最初の書き込み" rows="4" required></textarea>
+        <button type="submit">スレッド作成</button>
+      </form>
+    </div>
+    <div id="thread-content-view" style="display: none;">
+      <button id="back-to-list-btn">&laquo; スレッド一覧に戻る</button>
+      <h2 id="thread-title"></h2>
+      <div id="posts-container"></div>
+      <hr>
+      <h3>レスを書き込む</h3>
+      <form id="new-post-form">
+        <input type="hidden" id="current-thread-id">
+        <input type="text" id="new-post-author" placeholder="名前 (省略可)">
+        <textarea id="new-post-body" placeholder="書き込み内容" rows="4" required></textarea>
+        <button type="submit">書き込む</button>
+      </form>
+    </div>
+  </main>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const threadListView = document.getElementById('thread-list-view');
+      const threadContentView = document.getElementById('thread-content-view');
+      const threadListContainer = document.getElementById('thread-list');
+      
+      document.getElementById('new-thread-form').addEventListener('submit', createNewThread);
+      document.getElementById('new-post-form').addEventListener('submit', createNewPost);
+      document.getElementById('back-to-list-btn').addEventListener('click', showThreadList);
+
+      // --- Helper Functions ---
+      const escapeHTML = (str) => str.replace(/[&<>"']/g, (match) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[match]));
+      
+      async function handleApiError(response) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || '不明なエラーが発生しました。');
+      }
+
+      // --- API Call Functions ---
+      async function fetchAndDisplayThreads() {
+        try {
+          const response = await fetch('/api/threads');
+          if (!response.ok) await handleApiError(response);
+          const threads = await response.json();
+          
+          threadListContainer.innerHTML = '';
+          if (threads && threads.length > 0) {
+            threads.forEach(thread => {
+                const div = document.createElement('div');
+                div.className = 'thread-item';
+                div.innerHTML = `
+                  <div class="thread-details">
+                    ${thread.id}: <strong>${escapeHTML(thread.title)}</strong>
+                  </div>
+                  <div class="thread-meta">
+                    レス: ${thread.post_count}<br>
+                    更新: ${new Date(thread.last_updated).toLocaleString('ja-JP', { year:'2-digit', month:'2-digit', day:'2-digit', hour: '2-digit', minute: '2-digit'})}
+                  </div>
+                `;
+                div.dataset.threadId = thread.id;
+                div.addEventListener('click', () => viewThread(thread.id));
+                threadListContainer.appendChild(div);
+            });
+          } else {
+            threadListContainer.innerHTML = '<p>スレッドはまだありません。</p>';
+          }
+        } catch (error) { console.error(error); alert(error.message); }
+      }
+
+      async function viewThread(threadId) {
+        try {
+          const response = await fetch(`/api/threads/${threadId}`);
+          if (!response.ok) await handleApiError(response);
+          const { thread, posts } = await response.json();
+          
+          document.getElementById('thread-title').textContent = thread.title;
+          document.getElementById('current-thread-id').value = thread.id;
+          const postsContainer = document.getElementById('posts-container');
+          postsContainer.innerHTML = '';
+          posts.forEach(post => {
+            const div = document.createElement('div');
+            div.className = 'post';
+            div.innerHTML = `
+              <div class="post-header">
+                <span>${post.post_number}: ${escapeHTML(post.author || '名無しさん')}</span>
+                <span class="post-date">${new Date(post.created_at).toLocaleString('ja-JP')}</span>
+              </div>
+              <div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>
+            `;
+            postsContainer.appendChild(div);
+          });
+          
+          threadListView.style.display = 'none';
+          threadContentView.style.display = 'block';
+          window.scrollTo(0, 0);
+        } catch (error) { console.error(error); alert(error.message); }
+      }
+
+      async function createNewThread(event) {
+        event.preventDefault();
+        const title = document.getElementById('new-thread-title').value;
+        const author = document.getElementById('new-thread-author').value;
+        const body = document.getElementById('new-thread-body').value;
+        try {
+          const response = await fetch('/api/threads', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, author, body })
+          });
+          if (!response.ok) await handleApiError(response);
+          
+          document.getElementById('new-thread-form').reset();
+          await fetchAndDisplayThreads();
+        } catch(error) { console.error(error); alert(error.message); }
+      }
+
+      async function createNewPost(event) {
+        event.preventDefault();
+        const threadId = document.getElementById('current-thread-id').value;
+        const author = document.getElementById('new-post-author').value;
+        const body = document.getElementById('new-post-body').value;
+        try {
+          const response = await fetch(`/api/threads/${threadId}/posts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ author, body })
+          });
+          if (!response.ok) await handleApiError(response);
+          
+          document.getElementById('new-post-form').querySelector('textarea').value = ''; // 本文のみクリア
+          await viewThread(threadId); // 最新の状態を再表示
+        } catch(error) { console.error(error); alert(error.message); }
+      }
+
+      function showThreadList() {
+        threadContentView.style.display = 'none';
+        threadListView.style.display = 'block';
+        fetchAndDisplayThreads();
+      }
+
+      // --- Initial Load ---
+      fetchAndDisplayThreads();
+    });
+  </script>
+</body>
+</html>
