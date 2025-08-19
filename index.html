@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="ja">
-<!-- headとstyleは変更なし -->
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -23,10 +22,8 @@
     .post-header .post-date { color: #555; font-weight: normal; margin-left: 10px; }
     .post-body { margin-left: 1em; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
     #back-to-list-btn { margin-bottom: 15px; }
-    .loading-message { text-align: center; padding: 20px; color: #666; }
   </style>
 </head>
-<!-- bodyとmainの構造は変更なし -->
 <body>
   <header>
     <h1>Cloudflare BBS</h1>
@@ -59,46 +56,23 @@
       </form>
     </div>
   </main>
-  
+
   <script>
     document.addEventListener('DOMContentLoaded', () => {
-      // 基本的な要素取得とイベントリスナーは変更なし
       const threadListView = document.getElementById('thread-list-view');
       const threadContentView = document.getElementById('thread-content-view');
       const threadListContainer = document.getElementById('thread-list');
       
       document.getElementById('new-thread-form').addEventListener('submit', createNewThread);
       document.getElementById('new-post-form').addEventListener('submit', createNewPost);
-      document.getElementById('back-to-list-btn').addEventListener('click', () => {
-        history.pushState({ view: 'list' }, '', '/');
-        showThreadList();
-      });
+      document.getElementById('back-to-list-btn').addEventListener('click', showThreadList);
 
       // --- Helper Functions ---
-      const escapeHTML = (str) => str ? str.replace(/[&<>"']/g, (match) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[match])) : '';
+      const escapeHTML = (str) => str.replace(/[&<>"']/g, (match) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[match]));
       
       async function handleApiError(response) {
         const errorData = await response.json();
         throw new Error(errorData.error || '不明なエラーが発生しました。');
-      }
-
-      // --- Rendering Functions ---
-      function renderPosts(posts) {
-          const postsContainer = document.getElementById('posts-container');
-          postsContainer.innerHTML = '';
-          posts.sort((a, b) => a.post_number - b.post_number).forEach(post => {
-            if (!post) return; // 欠損のままのデータをスキップ
-            const div = document.createElement('div');
-            div.className = 'post';
-            div.innerHTML = `
-              <div class="post-header">
-                <span>${post.post_number}: ${escapeHTML(post.author || '名無しさん')}</span>
-                <span class="post-date">${new Date(post.created_at).toLocaleString('ja-JP')}</span>
-              </div>
-              <div class="post-body">${post.body.replace(/\n/g, '<br>')}</div>
-            `;
-            postsContainer.appendChild(div);
-          });
       }
 
       // --- API Call Functions ---
@@ -109,96 +83,58 @@
           const threads = await response.json();
           
           threadListContainer.innerHTML = '';
-          threads.forEach(thread => {
-              const div = document.createElement('div');
-              div.className = 'thread-item';
-              div.innerHTML = `
-                <div class="thread-details">
-                  ${thread.id}: <strong>${escapeHTML(thread.title)}</strong>
-                </div>
-                <div class="thread-meta">
-                  レス: ${thread.post_count}<br>
-                  更新: ${new Date(thread.last_updated).toLocaleString('ja-JP', { year:'2-digit', month:'2-digit', day:'2-digit', hour: '2-digit', minute: '2-digit'})}
-                </div>
-              `;
-              div.addEventListener('click', (e) => {
-                  e.preventDefault();
-                  history.pushState({ view: 'thread', threadId: thread.id }, `スレッド: ${thread.title}`, `/threads/${thread.id}`);
-                  viewThread(thread.id, thread);
-              });
-              threadListContainer.appendChild(div);
-          });
+          if (threads && threads.length > 0) {
+            threads.forEach(thread => {
+                const div = document.createElement('div');
+                div.className = 'thread-item';
+                div.innerHTML = `
+                  <div class="thread-details">
+                    ${thread.id}: <strong>${escapeHTML(thread.title)}</strong>
+                  </div>
+                  <div class="thread-meta">
+                    レス: ${thread.post_count}<br>
+                    更新: ${new Date(thread.last_updated).toLocaleString('ja-JP', { year:'2-digit', month:'2-digit', day:'2-digit', hour: '2-digit', minute: '2-digit'})}
+                  </div>
+                `;
+                div.dataset.threadId = thread.id;
+                div.addEventListener('click', () => viewThread(thread.id));
+                threadListContainer.appendChild(div);
+            });
+          } else {
+            threadListContainer.innerHTML = '<p>スレッドはまだありません。</p>';
+          }
         } catch (error) { console.error(error); alert(error.message); }
       }
 
-      async function viewThread(threadId, threadInfo) {
+      async function viewThread(threadId) {
+        try {
+          const response = await fetch(`/api/threads/${threadId}`);
+          if (!response.ok) await handleApiError(response);
+          const { thread, posts } = await response.json();
+          
+          document.getElementById('thread-title').textContent = thread.title;
+          document.getElementById('current-thread-id').value = thread.id;
+          const postsContainer = document.getElementById('posts-container');
+          postsContainer.innerHTML = '';
+          posts.forEach(post => {
+            const div = document.createElement('div');
+            div.className = 'post';
+            div.innerHTML = `
+              <div class="post-header">
+                <span>${post.post_number}: ${escapeHTML(post.author || '名無しさん')}</span>
+                <span class="post-date">${new Date(post.created_at).toLocaleString('ja-JP')}</span>
+              </div>
+              <div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>
+            `;
+            postsContainer.appendChild(div);
+          });
+          
           threadListView.style.display = 'none';
           threadContentView.style.display = 'block';
           window.scrollTo(0, 0);
-
-          const postsContainer = document.getElementById('posts-container');
-          postsContainer.innerHTML = '<div class="loading-message">読み込み中...</div>';
-          document.getElementById('thread-title').textContent = threadInfo.title;
-          document.getElementById('current-thread-id').value = threadId;
-
-          try {
-              // 1. まずスレッドの最新情報を取得して総レス数を知る
-              const threadResponse = await fetch(`/api/threads/${threadId}/info`);
-              if (!threadResponse.ok) await handleApiError(threadResponse);
-              const latestThreadInfo = await threadResponse.json();
-              const postCount = latestThreadInfo.post_count;
-
-              // 2. 全投稿のキャッシュを並行して取得試行 (CDNに対して)
-              const postPromises = [];
-              for (let i = 1; i <= postCount; i++) {
-                  postPromises.push(
-                      fetch(`/api/threads/${threadId}/posts/${i}`).then(res => res.ok ? res.json() : null)
-                  );
-              }
-              const allPostsResult = await Promise.all(postPromises);
-
-              // 3. 欠損している投稿番号をリストアップ
-              const missingPostNumbers = [];
-              allPostsResult.forEach((post, index) => {
-                  if (!post) {
-                      missingPostNumbers.push(index + 1);
-                  }
-              });
-
-              let finalPosts = allPostsResult.filter(p => p);
-
-              // 4. 欠損分があればサーバーに問い合わせて補完
-              if (missingPostNumbers.length > 0) {
-                  postsContainer.innerHTML = '<div class="loading-message">読み込み中...<br>更新頻度が低いスレッドは取得に時間がかかる場合があります。</div>';
-                  
-                  // D1から欠損分を取得するリクエスト
-                  const missingResponse = await fetch(`/api/posts/get-missing`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ threadId, postNumbers: missingPostNumbers })
-                  });
-                  if (!missingResponse.ok) await handleApiError(missingResponse);
-                  const newPosts = await missingResponse.json();
-                  finalPosts = finalPosts.concat(newPosts);
-
-                  // バックグラウンドでキャッシュ修復を依頼
-                  fetch(`/api/internal/request-cache-repair`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ threadId, postNumbers: missingPostNumbers })
-                  }).catch(err => console.error('Cache repair request failed:', err));
-              }
-
-              // 5. ページをレンダリング
-              renderPosts(finalPosts);
-
-          } catch (error) {
-              console.error(error);
-              postsContainer.innerHTML = `<div class="loading-message" style="color: red;">エラー: ${escapeHTML(error.message)}</div>`;
-          }
+        } catch (error) { console.error(error); alert(error.message); }
       }
-      
-      // createNewThread, createNewPostは変更なし
+
       async function createNewThread(event) {
         event.preventDefault();
         const title = document.getElementById('new-thread-title').value;
@@ -229,40 +165,20 @@
             body: JSON.stringify({ author, body })
           });
           if (!response.ok) await handleApiError(response);
-          const threadInfo = { id: threadId, title: document.getElementById('thread-title').textContent };
-          document.getElementById('new-post-form').querySelector('textarea').value = '';
-          await viewThread(threadId, threadInfo);
+          
+          document.getElementById('new-post-form').querySelector('textarea').value = ''; // 本文のみクリア
+          await viewThread(threadId); // 最新の状態を再表示
         } catch(error) { console.error(error); alert(error.message); }
       }
-      
-      // ページ表示のロジックを修正
+
       function showThreadList() {
-        threadListView.style.display = 'block';
         threadContentView.style.display = 'none';
+        threadListView.style.display = 'block';
         fetchAndDisplayThreads();
       }
-      
-      // URLに応じて初期表示を切り替える
-      const path = window.location.pathname;
-      const threadMatch = path.match(/^\/threads\/(\d+)$/);
-      if (threadMatch) {
-        const threadId = parseInt(threadMatch[1], 10);
-        // この場合、スレッド情報を取得する必要がある
-        fetch(`/api/threads/${threadId}/info`).then(res => res.json()).then(threadInfo => {
-           viewThread(threadId, threadInfo);
-        });
-      } else {
-        showThreadList();
-      }
-      // ブラウザの戻る/進むボタンに対応
-      window.onpopstate = (event) => {
-        if (event.state?.view === 'thread') {
-          viewThread(event.state.threadId, {id: event.state.threadId, title: ''}); // titleは再取得される
-        } else {
-          showThreadList();
-        }
-      };
 
+      // --- Initial Load ---
+      fetchAndDisplayThreads();
     });
   </script>
 </body>
