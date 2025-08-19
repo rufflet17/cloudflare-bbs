@@ -4,8 +4,6 @@
 // -----------------------------------------------------------------------------
 interface Env {
   MY_D1_DATABASE2: D1Database;
-  RATE_LIMITER: RateLimiter;
-  // KVの型定義は不要
 }
 
 interface Thread {
@@ -23,7 +21,8 @@ interface Post {
   created_at: string;
 }
 
-const POSTS_CACHE_TTL = 60 * 60 * 24 * 7; // 7日間
+const POSTS_CACHE_TTL = 60 * 60 * 24 * 7; // 個別スレッドの投稿一覧キャッシュ: 7日間
+const THREAD_LIST_CACHE_TTL = 30; // スレッド一覧のキャッシュ時間: 30秒
 
 // 2. メインハンドラ (リクエストのルーティング)
 // -----------------------------------------------------------------------------
@@ -35,10 +34,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
   try {
     if (method === 'GET' && path === '/api/threads') {
-      return await getThreads(env);
+      return await getThreads(request, env, waitUntil);
     }
     if (method === 'POST' && path === '/api/threads') {
-      return await createThread(request, env);
+      return await createThread(request, env, waitUntil);
     }
 
     const infoMatch = path.match(/^\/api\/threads\/(\d+)\/info$/);
@@ -71,41 +70,70 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   }
 };
 
-
 // 3. APIロジック (個別の関数)
 // -----------------------------------------------------------------------------
 
-async function getThreads(env: Env): Promise<Response> {
+async function getThreads(request: Request, env: Env, waitUntil: (promise: Promise<any>) => void): Promise<Response> {
+  const cache = caches.default;
+  const cacheKey = new Request(request.url, request);
+
+  const cachedResponse = await cache.match(cacheKey);
+  if (cachedResponse) {
+    console.log("Cache hit for thread list");
+    return cachedResponse;
+  }
+  console.log("Cache miss for thread list");
+
   const { results } = await env.MY_D1_DATABASE2.prepare(
-    "SELECT id, title, post_count, last_updated FROM threads ORDER BY last_updated DESC LIMIT 50"
+    "SELECT id, title, post_count, last_updated FROM threads_meta ORDER BY last_updated DESC LIMIT 50"
   ).all<Thread>();
-  return new Response(JSON.stringify(results ?? []), { headers: { "Content-Type": "application/json" } });
+  
+  const response = new Response(JSON.stringify(results ?? []), {
+    headers: { "Content-Type": "application/json" }
+  });
+
+  response.headers.set("Cache-Control", `public, max-age=${THREAD_LIST_CACHE_TTL}`);
+  waitUntil(cache.put(cacheKey, response.clone()));
+  
+  return response;
 }
 
 async function getThreadInfo(env: Env, threadId: number): Promise<Response> {
     const threadInfo = await env.MY_D1_DATABASE2.prepare("SELECT id, title, post_count FROM threads WHERE id = ?").bind(threadId).first<Thread>();
     if (!threadInfo) {
-      return new Response(JSON.stringify({ error: "Thread not found" }), { status: 404 });
+      return new Response(JSON.stringify({ error: "Thread not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
     }
     return new Response(JSON.stringify(threadInfo), { headers: { "Content-Type": "application/json" } });
 }
 
-async function createThread(request: Request, env: Env): Promise<Response> {
+async function createThread(request: Request, env: Env, waitUntil: (promise: Promise<any>) => void): Promise<Response> {
   const { title, author, body } = await request.json<{ title: string; author: string; body: string }>();
-  if (!title || !body) return new Response(JSON.stringify({ error: "Title and body are required." }), { status: 400 });
+  if (!title || !body) return new Response(JSON.stringify({ error: "Title and body are required." }), { status: 400, headers: { "Content-Type": "application/json" } });
 
   const threadResult = await env.MY_D1_DATABASE2.prepare("INSERT INTO threads (title) VALUES (?) RETURNING id").bind(title).first<{ id: number }>();
-  if (!threadResult?.id) throw new Error("Failed to create a new thread.");
+  const newThreadId = threadResult?.id;
+  if (!newThreadId) throw new Error("Failed to create a new thread.");
   
-  await env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body) VALUES (?, 1, ?, ?)")
-    .bind(threadResult.id, author || '名無しさん', body).run();
+  await env.MY_D1_DATABASE2.batch([
+    env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body) VALUES (?, 1, ?, ?)")
+      .bind(newThreadId, author || '名無しさん', body),
+    env.MY_D1_DATABASE2.prepare("INSERT INTO threads_meta (id, title) VALUES (?, ?)")
+      .bind(newThreadId, title)
+  ]);
   
-  return new Response(JSON.stringify({ id: threadResult.id }), { status: 201 });
+  const cache = caches.default;
+  const threadsCacheUrl = new URL(request.url);
+  threadsCacheUrl.pathname = '/api/threads';
+  threadsCacheUrl.search = '';
+  waitUntil(cache.delete(threadsCacheUrl.toString()));
+  console.log(`Cache purged for thread list: ${threadsCacheUrl.toString()}`);
+
+  return new Response(JSON.stringify({ id: newThreadId }), { status: 201, headers: { "Content-Type": "application/json" } });
 }
 
 async function getPostsForThread(request: Request, env: Env, waitUntil: (promise: Promise<any>) => void, threadId: number): Promise<Response> {
   const cache = caches.default;
-  const cacheKey = new Request(request.url, request); // Use a Request object as the cache key
+  const cacheKey = new Request(request.url, request);
 
   const cachedResponse = await cache.match(cacheKey);
   if (cachedResponse) {
@@ -130,30 +158,37 @@ async function getPostsForThread(request: Request, env: Env, waitUntil: (promise
 
 async function createPost(context: EventContext<Env, any, any>, threadId: number): Promise<Response> {
   const { request, env, waitUntil } = context;
-
-  const ip = request.headers.get("cf-connecting-ip") || "unknown";
-  const { success } = await env.RATE_LIMITER.limit({ key: ip });
-  if (!success) {
-    return new Response(JSON.stringify({ error: "書き込みが速すぎます。1秒に1回までです。" }), { status: 429 });
-  }
-
+  
   const { author, body } = await request.json<{ author: string; body: string }>();
-  if (!body) return new Response(JSON.stringify({ error: "Body is required." }), { status: 400 });
+  if (!body) return new Response(JSON.stringify({ error: "Body is required." }), { status: 400, headers: { "Content-Type": "application/json" } });
 
-  const [ updateResult, postResult ] = await env.MY_D1_DATABASE2.batch([
-    env.MY_D1_DATABASE2.prepare("UPDATE threads SET post_count = post_count + 1, last_updated = CURRENT_TIMESTAMP WHERE id = ?").bind(threadId),
-    env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body) SELECT ?, post_count + 1, ?, ? FROM threads WHERE id = ? RETURNING *").bind(threadId, author || '名無しさん', body, threadId)
+  const batchResults = await env.MY_D1_DATABASE2.batch([
+    env.MY_D1_DATABASE2.prepare("UPDATE threads SET post_count = post_count + 1, last_updated = CURRENT_TIMESTAMP WHERE id = ? RETURNING post_count").bind(threadId),
+    env.MY_D1_DATABASE2.prepare("UPDATE threads_meta SET post_count = post_count + 1, last_updated = CURRENT_TIMESTAMP WHERE id = ?").bind(threadId),
   ]);
-  const newPost = postResult.results[0] as Post;
-  if (!newPost) throw new Error("Failed to create post.");
+
+  const newPostCount = batchResults[0].results[0]?.post_count as number;
+  if (!newPostCount) throw new Error("Failed to update thread counters. Thread might not exist.");
+
+  const postResult = await env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body) VALUES (?, ?, ?, ?) RETURNING *")
+    .bind(threadId, newPostCount, author || '名無しさん', body)
+    .first<Post>();
+
+  if (!postResult) throw new Error("Failed to create post.");
 
   const cache = caches.default;
-  const getRequestUrl = new URL(request.url);
-  getRequestUrl.pathname = `/api/threads/${threadId}/posts`;
-  getRequestUrl.search = '';
   
-  waitUntil(cache.delete(getRequestUrl.toString()));
-  console.log(`Cache purged for ${getRequestUrl.toString()}`);
+  const postsCacheUrl = new URL(request.url);
+  postsCacheUrl.pathname = `/api/threads/${threadId}/posts`;
+  postsCacheUrl.search = '';
+  waitUntil(cache.delete(postsCacheUrl.toString()));
+  console.log(`Cache purged for posts: ${postsCacheUrl.toString()}`);
+
+  const threadsCacheUrl = new URL(request.url);
+  threadsCacheUrl.pathname = '/api/threads';
+  threadsCacheUrl.search = '';
+  waitUntil(cache.delete(threadsCacheUrl.toString()));
+  console.log(`Cache purged for thread list: ${threadsCacheUrl.toString()}`);
   
-  return new Response(JSON.stringify({ success: true, post: newPost }), { status: 201 });
+  return new Response(JSON.stringify({ success: true, post: postResult }), { status: 201, headers: { "Content-Type": "application/json" } });
 }
