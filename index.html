@@ -22,6 +22,7 @@
     .post-header .post-date { color: #555; font-weight: normal; margin-left: 10px; }
     .post-body { margin-left: 1em; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
     #back-to-list-btn { margin-bottom: 15px; }
+    #thread-message { padding: 10px; background-color: #fffbe6; border: 1px solid #ffe58f; margin-bottom: 15px; border-radius: 4px; }
   </style>
 </head>
 <body>
@@ -45,6 +46,7 @@
     <div id="thread-content-view" style="display: none;">
       <button id="back-to-list-btn">&laquo; スレッド一覧に戻る</button>
       <h2 id="thread-title"></h2>
+      <div id="thread-message" style="display: none;"></div>
       <div id="posts-container"></div>
       <hr>
       <h3>レスを書き込む</h3>
@@ -71,9 +73,41 @@
       const escapeHTML = (str) => str.replace(/[&<>"']/g, (match) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[match]));
       
       async function handleApiError(response) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || '不明なエラーが発生しました。');
+        try {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '不明なエラーが発生しました。');
+        } catch (e) {
+            // JSONのパースに失敗した場合など
+            throw new Error('サーバーとの通信に失敗しました。');
+        }
       }
+      
+      function renderPosts(posts) {
+          const postsContainer = document.getElementById('posts-container');
+          postsContainer.innerHTML = '';
+          posts.sort((a, b) => a.post_number - b.post_number).forEach(post => {
+            const div = document.createElement('div');
+            div.className = 'post';
+            div.innerHTML = `
+              <div class="post-header">
+                <span>${post.post_number}: ${escapeHTML(post.author || '名無しさん')}</span>
+                <span class="post-date">${new Date(post.created_at).toLocaleString('ja-JP')}</span>
+              </div>
+              <div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>
+            `;
+            postsContainer.appendChild(div);
+          });
+      }
+      
+      const showMessage = (msg) => {
+          const msgEl = document.getElementById('thread-message');
+          msgEl.textContent = msg;
+          msgEl.style.display = 'block';
+      };
+
+      const hideMessage = () => {
+          document.getElementById('thread-message').style.display = 'none';
+      };
 
       // --- API Call Functions ---
       async function fetchAndDisplayThreads() {
@@ -107,32 +141,74 @@
       }
 
       async function viewThread(threadId) {
+        threadListView.style.display = 'none';
+        threadContentView.style.display = 'block';
+        window.scrollTo(0, 0);
+
+        const postsContainer = document.getElementById('posts-container');
+        postsContainer.innerHTML = '';
+        hideMessage();
+
         try {
-          const response = await fetch(`/api/threads/${threadId}`);
-          if (!response.ok) await handleApiError(response);
-          const { thread, posts } = await response.json();
-          
-          document.getElementById('thread-title').textContent = thread.title;
-          document.getElementById('current-thread-id').value = thread.id;
-          const postsContainer = document.getElementById('posts-container');
-          postsContainer.innerHTML = '';
-          posts.forEach(post => {
-            const div = document.createElement('div');
-            div.className = 'post';
-            div.innerHTML = `
-              <div class="post-header">
-                <span>${post.post_number}: ${escapeHTML(post.author || '名無しさん')}</span>
-                <span class="post-date">${new Date(post.created_at).toLocaleString('ja-JP')}</span>
-              </div>
-              <div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>
-            `;
-            postsContainer.appendChild(div);
-          });
-          
-          threadListView.style.display = 'none';
-          threadContentView.style.display = 'block';
-          window.scrollTo(0, 0);
-        } catch (error) { console.error(error); alert(error.message); }
+            showMessage('スレッド情報を取得しています...');
+
+            // 1. スレッドのメタ情報（タイトル、総レス数）を取得
+            const infoResponse = await fetch(`/api/threads/${threadId}/info`);
+            if (!infoResponse.ok) await handleApiError(infoResponse);
+            const threadInfo = await infoResponse.json();
+
+            document.getElementById('thread-title').textContent = threadInfo.title;
+            document.getElementById('current-thread-id').value = threadInfo.id;
+            
+            if (threadInfo.post_count === 0) {
+                postsContainer.innerHTML = '<p>まだ投稿がありません。</p>';
+                hideMessage();
+                return;
+            }
+
+            // 2. キャッシュから投稿を取得し、欠損をチェック・再取得するループ
+            let attempts = 0;
+            const maxAttempts = 5; // 5回リトライ
+            while (attempts < maxAttempts) {
+                showMessage(`投稿データを取得しています... (試行: ${attempts + 1})`);
+                const postsResponse = await fetch(`/api/threads/${threadId}/posts`);
+                if (!postsResponse.ok) await handleApiError(postsResponse);
+                const cachedPosts = await postsResponse.json();
+                
+                // 取得できた投稿を先に描画
+                if (cachedPosts.length > 0) renderPosts(cachedPosts);
+
+                const postNumbers = new Set(cachedPosts.map(p => p.post_number));
+                const missingNumbers = [];
+                for (let i = 1; i <= threadInfo.post_count; i++) {
+                    if (!postNumbers.has(i)) {
+                        missingNumbers.push(i);
+                    }
+                }
+
+                if (missingNumbers.length === 0) {
+                    hideMessage(); // 全て揃ったらメッセージを消す
+                    return; // 完了
+                }
+                
+                // 3. 欠損があれば再キャッシュを要求
+                showMessage('長期間アクセスが無いスレッドは表示に時間がかかります。データを準備しています...');
+                await fetch(`/api/threads/${threadId}/recache`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ numbers: missingNumbers })
+                });
+
+                attempts++;
+                await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5秒待機
+            }
+
+            throw new Error('スレッドデータの取得に失敗しました。時間をおいて再度お試しください。');
+
+        } catch (error) {
+          console.error(error);
+          showMessage(`エラー: ${error.message}`);
+        }
       }
 
       async function createNewThread(event) {

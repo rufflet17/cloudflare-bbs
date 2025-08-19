@@ -22,6 +22,7 @@ interface Post {
   created_at: string;
 }
 
+const CACHE_TTL = 60 * 60 * 24 * 7; // 7 days in seconds
 
 // 2. メインハンドラ (リクエストのルーティング)
 // -----------------------------------------------------------------------------
@@ -32,23 +33,48 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   const method = request.method;
 
   try {
+    // スレッド一覧
     if (method === 'GET' && path === '/api/threads') {
       return await getThreads(env);
     }
+    // スレッド作成
     if (method === 'POST' && path === '/api/threads') {
-      return await createThread(request, env);
+      return await createThread(request, env, waitUntil);
     }
-    const threadMatch = path.match(/^\/api\/threads\/(\d+)$/);
-    if (method === 'GET' && threadMatch) {
-      const threadId = parseInt(threadMatch[1], 10);
-      return await getThreadById(request, env, waitUntil, threadId);
+
+    // --- 個別スレッド関連のエンドポイント ---
+
+    // スレッド情報取得
+    const infoMatch = path.match(/^\/api\/threads\/(\d+)\/info$/);
+    if (method === 'GET' && infoMatch) {
+      const threadId = parseInt(infoMatch[1], 10);
+      return await getThreadInfo(env, threadId);
     }
-    const postMatch = path.match(/^\/api\/threads\/(\d+)\/posts$/);
-    if (method === 'POST' && postMatch) {
-      const threadId = parseInt(postMatch[1], 10);
+    
+    // キャッシュ済み投稿取得
+    const getPostsMatch = path.match(/^\/api\/threads\/(\d+)\/posts$/);
+    if (method === 'GET' && getPostsMatch) {
+      const threadId = parseInt(getPostsMatch[1], 10);
+      return await getCachedPosts(env, threadId);
+    }
+    
+    // 投稿作成
+    const createPostMatch = path.match(/^\/api\/threads\/(\d+)\/posts$/);
+    if (method === 'POST' && createPostMatch) {
+      const threadId = parseInt(createPostMatch[1], 10);
       return await createPost(request, env, waitUntil, threadId);
     }
-    return new Response('API endpoint not found', { status: 404 });
+    
+    // 投稿の再キャッシュ要求
+    const recacheMatch = path.match(/^\/api\/threads\/(\d+)\/recache$/);
+    if (method === 'POST' && recacheMatch) {
+        const threadId = parseInt(recacheMatch[1], 10);
+        return await recachePosts(request, env, threadId);
+    }
+    
+    return new Response(JSON.stringify({ error: 'API endpoint not found' }), { 
+        status: 404, headers: { "Content-Type": "application/json" } 
+    });
 
   } catch (e: any) {
     console.error("API Error:", e);
@@ -77,13 +103,14 @@ async function getThreads(env: Env): Promise<Response> {
   });
 }
 
-async function createThread(request: Request, env: Env): Promise<Response> {
+async function createThread(request: Request, env: Env, waitUntil: (promise: Promise<any>) => void): Promise<Response> {
   const { title, author, body } = await request.json<{ title: string; author: string; body: string }>();
 
   if (!title || !body) {
     return new Response(JSON.stringify({ error: "Title and body are required." }), { status: 400 });
   }
 
+  // 1. スレッドをD1に作成
   const threadResult = await env.MY_D1_DATABASE2
     .prepare("INSERT INTO threads (title) VALUES (?) RETURNING id")
     .bind(title)
@@ -94,10 +121,17 @@ async function createThread(request: Request, env: Env): Promise<Response> {
   }
   const newThreadId = threadResult.id;
 
-  await env.MY_D1_DATABASE2
-    .prepare("INSERT INTO posts (thread_id, post_number, author, body) VALUES (?, 1, ?, ?)")
+  // 2. 最初の投稿をD1に作成し、そのデータを取得
+  const firstPost = await env.MY_D1_DATABASE2
+    .prepare("INSERT INTO posts (thread_id, post_number, author, body) VALUES (?, 1, ?, ?) RETURNING *")
     .bind(newThreadId, author || '名無しさん', body)
-    .run();
+    .first<Post>();
+
+  // 3. 最初の投稿をKVにキャッシュ
+  if(firstPost) {
+    const kvKey = `thread:${newThreadId}:post:${firstPost.post_number}`;
+    waitUntil(env.MY_KV_NAMESPACE2.put(kvKey, JSON.stringify(firstPost), { expirationTtl: CACHE_TTL }));
+  }
   
   return new Response(JSON.stringify({ id: newThreadId }), {
     status: 201,
@@ -105,103 +139,78 @@ async function createThread(request: Request, env: Env): Promise<Response> {
   });
 }
 
-/**
- * 特定のスレッドと投稿一覧を取得する (キャッシュキーを修正)
- */
-async function getThreadById(request: Request, env: Env, waitUntil: (promise: Promise<any>) => void, threadId: number): Promise<Response> {
-  const cache = caches.default;
-  
-  // ★★★ 修正点 1: キャッシュキーをリクエストURLの文字列にする ★★★
-  const cacheKey = request.url;
-  
-  const cachedResponse = await cache.match(cacheKey);
-  if (cachedResponse) {
-    console.log(`Cache hit for thread ${threadId}`);
-    return cachedResponse;
-  }
-  console.log(`Cache miss for thread ${threadId}`);
-
-  const threadInfo = await env.MY_D1_DATABASE2.prepare("SELECT * FROM threads WHERE id = ?").bind(threadId).first<Thread>();
-  if (!threadInfo) {
-    return new Response(JSON.stringify({ error: "Thread not found" }), { status: 404 });
-  }
-
-  let snapshotPosts: Post[] = [];
-  let lastSnapshotNumber = 0;
-  for (let i = Math.floor(threadInfo.post_count / 100) * 100; i > 0; i -= 100) {
-    const kvKey = `thread-${threadId}-snapshot-${i}`;
-    const snapshotJson = await env.MY_KV_NAMESPACE2.get(kvKey);
-    if (snapshotJson) {
-      snapshotPosts = JSON.parse(snapshotJson);
-      lastSnapshotNumber = i;
-      break;
+async function getThreadInfo(env: Env, threadId: number): Promise<Response> {
+    const threadInfo = await env.MY_D1_DATABASE2.prepare("SELECT id, title, post_count FROM threads WHERE id = ?").bind(threadId).first<Thread>();
+    if (!threadInfo) {
+      return new Response(JSON.stringify({ error: "Thread not found" }), { status: 404 });
     }
-  }
-
-  const { results: newPosts } = await env.MY_D1_DATABASE2.prepare(
-    "SELECT * FROM posts WHERE thread_id = ? AND post_number > ? ORDER BY post_number ASC"
-  ).bind(threadId, lastSnapshotNumber).all<Post>();
-  
-  const allPosts = [...snapshotPosts, ...newPosts];
-  const responsePayload = { thread: threadInfo, posts: allPosts };
-  const response = new Response(JSON.stringify(responsePayload), {
-    headers: { "Content-Type": "application/json" }
-  });
-  
-  response.headers.set("Cache-Control", "public, max-age=60");
-  
-  // ★★★ 修正点 2: 保存時も同じURL文字列をキーにする ★★★
-  waitUntil(cache.put(cacheKey, response.clone()));
-
-  return response;
+    return new Response(JSON.stringify(threadInfo), {
+      headers: { "Content-Type": "application/json" }
+    });
 }
 
-/**
- * スレッドに新しい投稿を追加する (キャッシュキーを修正)
- */
+async function getCachedPosts(env: Env, threadId: number): Promise<Response> {
+    const list = await env.MY_KV_NAMESPACE2.list({ prefix: `thread:${threadId}:post:` });
+    if (list.keys.length === 0) {
+        return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" }});
+    }
+
+    const promises = list.keys.map(key => env.MY_KV_NAMESPACE2.get(key.name));
+    const values = await Promise.all(promises);
+    
+    const posts = values.filter(v => v !== null).map(v => JSON.parse(v!));
+
+    return new Response(JSON.stringify(posts), { headers: { "Content-Type": "application/json" }});
+}
+
+
 async function createPost(request: Request, env: Env, waitUntil: (promise: Promise<any>) => void, threadId: number): Promise<Response> {
   const { author, body } = await request.json<{ author: string; body: string }>();
   if (!body) {
     return new Response(JSON.stringify({ error: "Body is required." }), { status: 400 });
   }
 
-  const [updateResult] = await env.MY_D1_DATABASE2.batch([
-    env.MY_D1_DATABASE2.prepare("UPDATE threads SET post_count = post_count + 1, last_updated = CURRENT_TIMESTAMP WHERE id = ? RETURNING post_count").bind(threadId)
+  // 1. トランザクションでD1を更新・挿入し、新しい投稿データを取得
+  const [ updateResult, postResult ] = await env.MY_D1_DATABASE2.batch([
+    env.MY_D1_DATABASE2.prepare("UPDATE threads SET post_count = post_count + 1, last_updated = CURRENT_TIMESTAMP WHERE id = ? RETURNING post_count").bind(threadId),
+    env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body) SELECT ?, post_count, ?, ? FROM threads WHERE id = ? RETURNING *").bind(threadId, author || '名無しさん', body, threadId)
   ]);
-  const newPostCount = updateResult.results[0].post_count as number;
-
-  await env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body) VALUES (?, ?, ?, ?)")
-    .bind(threadId, newPostCount, author || '名無しさん', body)
-    .run();
   
-  if (newPostCount > 0 && newPostCount % 100 === 0) {
-    waitUntil(createAndStoreSnapshot(env, threadId, newPostCount));
+  const newPost = postResult.results[0] as Post;
+  
+  if (!newPost) {
+      throw new Error("Failed to create post.");
   }
+
+  // 2. 新しい投稿をKVにキャッシュ
+  const kvKey = `thread:${threadId}:post:${newPost.post_number}`;
+  waitUntil(env.MY_KV_NAMESPACE2.put(kvKey, JSON.stringify(newPost), { expirationTtl: CACHE_TTL }));
   
-  // ★★★ 修正点 3: キャッシュ削除時に、GETリクエストと同一のURL文字列を生成してキーにする ★★★
-  const cache = caches.default;
-  const getRequestUrl = new URL(request.url);
-  getRequestUrl.pathname = `/api/threads/${threadId}`;
-  waitUntil(cache.delete(getRequestUrl.toString()));
-  
-  return new Response(JSON.stringify({ success: true, postCount: newPostCount }), { status: 201 });
+  return new Response(JSON.stringify({ success: true, post: newPost }), { status: 201 });
 }
 
-
-// 4. ヘルパー関数
-// -----------------------------------------------------------------------------
-async function createAndStoreSnapshot(env: Env, threadId: number, postCount: number): Promise<void> {
-  try {
-    const { results } = await env.MY_D1_DATABASE2.prepare(
-      "SELECT * FROM posts WHERE thread_id = ? AND post_number <= ? ORDER BY post_number ASC"
-    ).bind(threadId, postCount).all<Post>();
-    
-    if (results && results.length > 0) {
-      const kvKey = `thread-${threadId}-snapshot-${postCount}`;
-      await env.MY_KV_NAMESPACE2.put(kvKey, JSON.stringify(results), { expirationTtl: 86400 * 7 });
-      console.log(`Successfully created snapshot for thread ${threadId} at post ${postCount}`);
+async function recachePosts(request: Request, env: Env, threadId: number): Promise<Response> {
+    const { numbers } = await request.json<{ numbers: number[] }>();
+    if (!Array.isArray(numbers) || numbers.length === 0) {
+        return new Response(JSON.stringify({ error: "Post numbers must be a non-empty array." }), { status: 400 });
     }
-  } catch (e) {
-    console.error(`Failed to create snapshot for thread ${threadId}:`, e);
-  }
+    
+    // D1はIN句のプレースホルダーを1つしか受け付けないため、文字列を組み立てる必要がある
+    const placeholders = numbers.map(() => '?').join(',');
+    const query = `SELECT * FROM posts WHERE thread_id = ? AND post_number IN (${placeholders})`;
+    
+    const { results: postsToCache } = await env.MY_D1_DATABASE2
+      .prepare(query)
+      .bind(threadId, ...numbers)
+      .all<Post>();
+      
+    if (postsToCache && postsToCache.length > 0) {
+        const promises = postsToCache.map(post => {
+            const kvKey = `thread:${threadId}:post:${post.post_number}`;
+            return env.MY_KV_NAMESPACE2.put(kvKey, JSON.stringify(post), { expirationTtl: CACHE_TTL });
+        });
+        await Promise.all(promises);
+    }
+    
+    return new Response(JSON.stringify({ success: true, recachedCount: postsToCache?.length ?? 0 }));
 }
