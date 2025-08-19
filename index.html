@@ -5,38 +5,165 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cloudflare BBS</title>
   <style>
-    body { font-family: 'MS PGothic', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif; background-color: #efefef; color: #333; }
-    header { background-color: #ddd; padding: 10px; text-align: center; }
-    main { max-width: 800px; margin: 20px auto; background-color: #fff; padding: 20px; border: 1px solid #ccc; }
-    h2, h3 { border-bottom: 2px solid #99c; }
+    /* 1. CSS変数 (テーマの定義) */
+    :root {
+      --font-classic: 'MS PGothic', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
+      --font-modern: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Sans', 'Noto Sans CJK JP', 'Noto Sans JP', sans-serif;
+    }
+
+    body[data-theme="classic"] {
+      --font-family: var(--font-classic);
+      --bg-color: #efefef;
+      --main-bg-color: #fff;
+      --text-color: #333;
+      --header-bg-color: #ddd;
+      --border-color: #ccc;
+      --accent-color: #99c;
+      --link-color: #007bff;
+      --link-hover-color: #0056b3;
+      --post-name-color: #006400;
+      --post-meta-color: #555;
+      --post-border-color: #eee;
+      --thread-hover-bg: #f0f8ff;
+      --card-radius: 0px;
+      --card-shadow: none;
+    }
+
+    body[data-theme="modern"] {
+      --font-family: var(--font-modern);
+      --bg-color: #f4f7f9;
+      --main-bg-color: #ffffff;
+      --text-color: #2c3e50;
+      --header-bg-color: #ffffff;
+      --border-color: #e0e6ed;
+      --accent-color: #3498db;
+      --link-color: #3498db;
+      --link-hover-color: #2980b9;
+      --post-name-color: #27ae60;
+      --post-meta-color: #7f8c8d;
+      --post-border-color: transparent;
+      --thread-hover-bg: #ecf5ff;
+      --card-radius: 8px;
+      --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+    }
+    
+    /* 2. 基本スタイル (CSS変数を適用) */
+    body { 
+      font-family: var(--font-family); 
+      background-color: var(--bg-color); 
+      color: var(--text-color); 
+      margin: 0;
+      transition: background-color 0.2s, color 0.2s;
+    }
+    header { 
+      background-color: var(--header-bg-color); 
+      padding: 10px; 
+      text-align: center; 
+      border-bottom: 1px solid var(--border-color);
+      box-shadow: var(--card-shadow);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    main { 
+      max-width: 800px; 
+      margin: 20px auto; 
+      background-color: var(--main-bg-color); 
+      padding: 20px; 
+      border: 1px solid var(--border-color);
+      border-radius: var(--card-radius);
+    }
+    h2, h3 { 
+      border-bottom: 2px solid var(--accent-color); 
+      padding-bottom: 5px;
+    }
     form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
-    input, textarea { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; }
-    button { padding: 10px; background-color: #007bff; color: white; border: none; cursor: pointer; border-radius: 4px; }
-    button:hover { background-color: #0056b3; }
+    input, textarea { 
+      padding: 10px; 
+      border: 1px solid var(--border-color); 
+      border-radius: 4px; 
+      font-family: inherit; 
+      font-size: 1em;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+    }
+    input:focus, textarea:focus {
+        outline: none;
+        border-color: var(--link-color);
+        box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+    }
+    button { 
+      padding: 10px; 
+      background-color: var(--link-color); 
+      color: white; 
+      border: none; 
+      cursor: pointer; 
+      border-radius: 4px;
+      font-size: 1em;
+      font-weight: bold;
+      transition: background-color 0.2s;
+    }
+    button:hover { background-color: var(--link-hover-color); }
     button:disabled { background-color: #6c757d; cursor: not-allowed; }
-    #thread-list .thread-item { cursor: pointer; padding: 10px; border-bottom: 1px dotted #ccc; display: flex; justify-content: space-between; align-items: center; }
-    #thread-list .thread-item:hover { background-color: #f0f8ff; }
+    
+    /* テーマ切り替えボタン */
+    .theme-switcher { margin-bottom: 10px; text-align: right; }
+    .theme-switcher button {
+      padding: 5px 10px;
+      font-size: 0.8em;
+      margin-left: 5px;
+      background-color: #ccc;
+      color: #333;
+      font-weight: normal;
+    }
+    .theme-switcher button.active {
+      background-color: var(--link-color);
+      color: white;
+    }
+
+    #thread-list .thread-item { 
+      cursor: pointer; 
+      padding: 10px; 
+      border-bottom: 1px dotted var(--border-color); 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center;
+      transition: background-color 0.2s;
+    }
+    #thread-list .thread-item:hover { background-color: var(--thread-hover-bg); }
     .thread-details { flex-grow: 1; }
     .thread-meta { font-size: 0.8em; color: #666; text-align: right; white-space: nowrap; }
-    .post { margin-bottom: 15px; border-left: 3px solid #eee; padding-left: 10px; }
-    .post-header { font-size: 0.9em; color: #006400; font-weight: bold; }
-    .post-header .post-date { color: #555; font-weight: normal; margin-left: 10px; }
+    
+    .post { 
+      margin-bottom: 15px; 
+      padding-left: 10px; 
+      border-left: 3px solid var(--post-border-color); 
+    }
+    .post-header { font-size: 0.9em; color: var(--post-name-color); font-weight: bold; }
+    .post-header .post-date { color: var(--post-meta-color); font-weight: normal; margin-left: 10px; }
     .post-body { margin-left: 1em; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+    
+    /* モダンテーマ専用スタイル */
+    body[data-theme="modern"] .post {
+      border-left: none;
+      padding: 15px;
+      background-color: var(--bg-color);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+    }
+    body[data-theme="modern"] .post-body {
+        margin-left: 0;
+    }
+    
     #back-to-list-btn { margin-bottom: 15px; }
-    #loading-overlay {
-      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background-color: rgba(255, 255, 255, 0.85); z-index: 1000;
-      display: flex; flex-direction: column; justify-content: center; align-items: center;
-      color: #333; font-size: 1.1em; text-align: center;
-    }
-    .loading-spinner {
-      border: 4px solid #f3f3f3; border-top: 4px solid #007bff; border-radius: 50%;
-      width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 20px;
-    }
+
+    /* ローディングオーバーレイ */
+    #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(255, 255, 255, 0.85); z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; color: #333; font-size: 1.1em; text-align: center; }
+    .loading-spinner { border: 4px solid #f3f3f3; border-top: 4px solid var(--link-color); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 20px; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   </style>
 </head>
-<body>
+<body data-theme="classic">
 
   <div id="loading-overlay" style="display: none;">
     <div class="loading-spinner"></div>
@@ -48,6 +175,11 @@
   </header>
 
   <main>
+    <div class="theme-switcher">
+        <button data-theme="classic">クラシック</button>
+        <button data-theme="modern">モダン</button>
+    </div>
+
     <div id="thread-list-view">
       <h2>スレッド一覧</h2>
       <div id="thread-list"></div>
@@ -60,6 +192,7 @@
         <button type="submit">スレッド作成</button>
       </form>
     </div>
+    
     <div id="thread-content-view" style="display: none;">
       <button id="back-to-list-btn">&laquo; スレッド一覧に戻る</button>
       <h2 id="thread-title"></h2>
@@ -77,6 +210,28 @@
 
   <script>
     document.addEventListener('DOMContentLoaded', () => {
+      // --- テーマ切り替えのロジック ---
+      const themeSwitcher = document.querySelector('.theme-switcher');
+      const themeButtons = themeSwitcher.querySelectorAll('button');
+      
+      const applyTheme = (theme) => {
+        document.body.setAttribute('data-theme', theme);
+        themeButtons.forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.theme === theme);
+        });
+        localStorage.setItem('theme', theme);
+      };
+
+      themeSwitcher.addEventListener('click', (event) => {
+        if (event.target.tagName === 'BUTTON') {
+          applyTheme(event.target.dataset.theme);
+        }
+      });
+      
+      const savedTheme = localStorage.getItem('theme') || 'classic';
+      applyTheme(savedTheme);
+      
+      // --- BBSロジック ---
       const threadListView = document.getElementById('thread-list-view');
       const threadContentView = document.getElementById('thread-content-view');
       const threadListContainer = document.getElementById('thread-list');
