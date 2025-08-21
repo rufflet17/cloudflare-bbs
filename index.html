@@ -5,33 +5,159 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cloudflare BBS</title>
   <style>
-    :root { --font-classic: 'MS PGothic', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif; --font-modern: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Sans', 'Noto Sans CJK JP', 'Noto Sans JP', sans-serif; }
-    body[data-theme="classic"] { --font-family: var(--font-classic); --bg-color: #efefef; --main-bg-color: #fff; --text-color: #333; --header-bg-color: #ddd; --border-color: #ccc; --accent-color: #99c; --link-color: #007bff; --link-hover-color: #0056b3; --post-name-color: #006400; --post-meta-color: #555; --post-border-color: #eee; --thread-hover-bg: #f0f8ff; --card-radius: 0px; --card-shadow: none; }
-    body[data-theme="modern"] { --font-family: var(--font-modern); --bg-color: #f4f7f9; --main-bg-color: #ffffff; --text-color: #2c3e50; --header-bg-color: #ffffff; --border-color: #e0e6ed; --accent-color: #3498db; --link-color: #3498db; --link-hover-color: #2980b9; --post-name-color: #27ae60; --post-meta-color: #7f8c8d; --post-border-color: transparent; --thread-hover-bg: #ecf5ff; --card-radius: 8px; --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.05); }
-    body { font-family: var(--font-family); background-color: var(--bg-color); color: var(--text-color); margin: 0; transition: background-color 0.2s, color 0.2s; }
-    header { background-color: var(--header-bg-color); padding: 10px; text-align: center; border-bottom: 1px solid var(--border-color); box-shadow: var(--card-shadow); position: sticky; top: 0; z-index: 10; }
-    main { max-width: 800px; margin: 20px auto; background-color: var(--main-bg-color); padding: 20px; border: 1px solid var(--border-color); border-radius: var(--card-radius); }
-    h2, h3 { border-bottom: 2px solid var(--accent-color); padding-bottom: 5px; }
+    /* 1. CSS変数 (テーマの定義) */
+    :root {
+      --font-classic: 'MS PGothic', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
+      --font-modern: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Sans', 'Noto Sans CJK JP', 'Noto Sans JP', sans-serif;
+    }
+
+    body[data-theme="classic"] {
+      --font-family: var(--font-classic);
+      --bg-color: #efefef;
+      --main-bg-color: #fff;
+      --text-color: #333;
+      --header-bg-color: #ddd;
+      --border-color: #ccc;
+      --accent-color: #99c;
+      --link-color: #007bff;
+      --link-hover-color: #0056b3;
+      --post-name-color: #006400;
+      --post-meta-color: #555;
+      --post-border-color: #eee;
+      --thread-hover-bg: #f0f8ff;
+      --card-radius: 0px;
+      --card-shadow: none;
+    }
+
+    body[data-theme="modern"] {
+      --font-family: var(--font-modern);
+      --bg-color: #f4f7f9;
+      --main-bg-color: #ffffff;
+      --text-color: #2c3e50;
+      --header-bg-color: #ffffff;
+      --border-color: #e0e6ed;
+      --accent-color: #3498db;
+      --link-color: #3498db;
+      --link-hover-color: #2980b9;
+      --post-name-color: #27ae60;
+      --post-meta-color: #7f8c8d;
+      --post-border-color: transparent;
+      --thread-hover-bg: #ecf5ff;
+      --card-radius: 8px;
+      --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+    }
+    
+    /* 2. 基本スタイル (CSS変数を適用) */
+    body { 
+      font-family: var(--font-family); 
+      background-color: var(--bg-color); 
+      color: var(--text-color); 
+      margin: 0;
+      transition: background-color 0.2s, color 0.2s;
+    }
+    header { 
+      background-color: var(--header-bg-color); 
+      padding: 10px; 
+      text-align: center; 
+      border-bottom: 1px solid var(--border-color);
+      box-shadow: var(--card-shadow);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    main { 
+      max-width: 800px; 
+      margin: 20px auto; 
+      background-color: var(--main-bg-color); 
+      padding: 20px; 
+      border: 1px solid var(--border-color);
+      border-radius: var(--card-radius);
+    }
+    h2, h3 { 
+      border-bottom: 2px solid var(--accent-color); 
+      padding-bottom: 5px;
+    }
     form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
-    input, textarea { padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; font-family: inherit; font-size: 1em; background-color: var(--bg-color); color: var(--text-color); }
-    input:focus, textarea:focus { outline: none; border-color: var(--link-color); box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2); }
-    button { padding: 10px; background-color: var(--link-color); color: white; border: none; cursor: pointer; border-radius: 4px; font-size: 1em; font-weight: bold; transition: background-color 0.2s; }
+    input, textarea { 
+      padding: 10px; 
+      border: 1px solid var(--border-color); 
+      border-radius: 4px; 
+      font-family: inherit; 
+      font-size: 1em;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+    }
+    input:focus, textarea:focus {
+        outline: none;
+        border-color: var(--link-color);
+        box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+    }
+    button { 
+      padding: 10px; 
+      background-color: var(--link-color); 
+      color: white; 
+      border: none; 
+      cursor: pointer; 
+      border-radius: 4px;
+      font-size: 1em;
+      font-weight: bold;
+      transition: background-color 0.2s;
+    }
     button:hover { background-color: var(--link-hover-color); }
     button:disabled { background-color: #6c757d; cursor: not-allowed; }
+    
+    /* テーマ切り替えボタン */
     .theme-switcher { margin-bottom: 10px; text-align: right; }
-    .theme-switcher button { padding: 5px 10px; font-size: 0.8em; margin-left: 5px; background-color: #ccc; color: #333; font-weight: normal; }
-    .theme-switcher button.active { background-color: var(--link-color); color: white; }
-    #thread-list .thread-item { cursor: pointer; padding: 10px; border-bottom: 1px dotted var(--border-color); display: flex; justify-content: space-between; align-items: center; transition: background-color 0.2s; }
+    .theme-switcher button {
+      padding: 5px 10px;
+      font-size: 0.8em;
+      margin-left: 5px;
+      background-color: #ccc;
+      color: #333;
+      font-weight: normal;
+    }
+    .theme-switcher button.active {
+      background-color: var(--link-color);
+      color: white;
+    }
+
+    #thread-list .thread-item { 
+      cursor: pointer; 
+      padding: 10px; 
+      border-bottom: 1px dotted var(--border-color); 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center;
+      transition: background-color 0.2s;
+    }
     #thread-list .thread-item:hover { background-color: var(--thread-hover-bg); }
     .thread-details { flex-grow: 1; }
     .thread-meta { font-size: 0.8em; color: #666; text-align: right; white-space: nowrap; }
-    .post { margin-bottom: 15px; padding-left: 10px; border-left: 3px solid var(--post-border-color); }
+    
+    .post { 
+      margin-bottom: 15px; 
+      padding-left: 10px; 
+      border-left: 3px solid var(--post-border-color); 
+    }
     .post-header { font-size: 0.9em; color: var(--post-name-color); font-weight: bold; }
     .post-header .post-date { color: var(--post-meta-color); font-weight: normal; margin-left: 10px; }
     .post-body { margin-left: 1em; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
-    body[data-theme="modern"] .post { border-left: none; padding: 15px; background-color: var(--bg-color); border: 1px solid var(--border-color); border-radius: 6px; }
-    body[data-theme="modern"] .post-body { margin-left: 0; }
+    
+    /* モダンテーマ専用スタイル */
+    body[data-theme="modern"] .post {
+      border-left: none;
+      padding: 15px;
+      background-color: var(--bg-color);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+    }
+    body[data-theme="modern"] .post-body {
+        margin-left: 0;
+    }
+    
     #back-to-list-btn { margin-bottom: 15px; }
+
+    /* ローディングオーバーレイ */
     #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(255, 255, 255, 0.85); z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; color: #333; font-size: 1.1em; text-align: center; }
     .loading-spinner { border: 4px solid #f3f3f3; border-top: 4px solid var(--link-color); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 20px; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -71,7 +197,6 @@
       <button id="back-to-list-btn">&laquo; スレッド一覧に戻る</button>
       <h2 id="thread-title"></h2>
       <div id="posts-container"></div>
-      <!-- 「もっと読む」ボタンのコンテナを削除 -->
       <hr>
       <h3>レスを書き込む</h3>
       <form id="new-post-form">
@@ -116,13 +241,6 @@
       document.getElementById('new-thread-form').addEventListener('submit', createNewThread);
       document.getElementById('new-post-form').addEventListener('submit', createNewPost);
       document.getElementById('back-to-list-btn').addEventListener('click', showThreadList);
-      
-      // --- ヘルパー関数 ---
-      const formatAsLocaleTime = (utcDateString, options = {}) => {
-        if (!utcDateString) return '';
-        const dateAsUTC = new Date(utcDateString.replace(' ', 'T') + 'Z');
-        return dateAsUTC.toLocaleString(undefined, options);
-      };
 
       const escapeHTML = (str) => str.replace(/[&<>"']/g, (match) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[match]));
       
@@ -144,36 +262,23 @@
       
       function renderPosts(posts) {
           const postsContainer = document.getElementById('posts-container');
-          const fragment = document.createDocumentFragment();
-          posts.sort((a, b) => a.post_number - b.post_number).forEach(post => {
-            const div = document.createElement('div');
-            div.className = 'post';
-            div.innerHTML = `
-                <div class="post-header">
-                <span>${post.post_number}: ${escapeHTML(post.author || '名無しさん')}</span>
-                <span class="post-date">${formatAsLocaleTime(post.created_at)}</span>
-                </div>
-                <div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>
-            `;
-            fragment.appendChild(div);
-          });
-          postsContainer.appendChild(fragment);
+          postsContainer.innerHTML = '';
+          posts.sort((a, b) => a.post_number - b.post_number).forEach(post => { appendPost(post); });
       }
 
       function appendPost(post) {
         const postsContainer = document.getElementById('posts-container');
-        const noPostMsg = postsContainer.querySelector('p.no-posts');
-        if (noPostMsg) noPostMsg.remove();
-
         const div = document.createElement('div');
         div.className = 'post';
         div.innerHTML = `
             <div class="post-header">
             <span>${post.post_number}: ${escapeHTML(post.author || '名無しさん')}</span>
-            <span class="post-date">${formatAsLocaleTime(post.created_at)}</span>
+            <span class="post-date">${new Date(post.created_at).toLocaleString('ja-JP')}</span>
             </div>
             <div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>
         `;
+        const noPostMsg = postsContainer.querySelector('p.no-posts');
+        if (noPostMsg) noPostMsg.remove();
         postsContainer.appendChild(div);
       }
 
@@ -194,7 +299,7 @@
                   </div>
                   <div class="thread-meta">
                     レス: ${thread.post_count}<br>
-                    更新: ${formatAsLocaleTime(thread.last_updated, { year:'2-digit', month:'2-digit', day:'2-digit', hour: '2-digit', minute: '2-digit'})}
+                    更新: ${new Date(thread.last_updated).toLocaleString('ja-JP', { year:'2-digit', month:'2-digit', day:'2-digit', hour: '2-digit', minute: '2-digit'})}
                   </div>`;
                 div.dataset.threadId = thread.id;
                 div.addEventListener('click', () => viewThread(thread.id));
@@ -211,58 +316,41 @@
         threadListView.style.display = 'none';
         threadContentView.style.display = 'block';
         window.scrollTo(0, 0);
-
-        document.getElementById('posts-container').innerHTML = '';
+        const postsContainer = document.getElementById('posts-container');
+        postsContainer.innerHTML = '';
         
         showLoadingOverlay('スレッドを読み込んでいます...');
         let slowLoadTimer = setTimeout(() => {
-            loadingMessage.textContent = '投稿数が多いスレッドは表示に時間がかかることがあります...';
+            loadingMessage.textContent = '長期間アクセスが無いスレッドは表示に時間がかかります。データを準備しています...';
         }, 800);
 
         try {
-            const infoResponse = await fetch(`/api/threads/${threadId}/info`);
+            const infoPromise = fetch(`/api/threads/${threadId}/info`);
+            const postsPromise = fetch(`/api/threads/${threadId}/posts`);
+
+            const [infoResponse, postsResponse] = await Promise.all([infoPromise, postsPromise]);
+
             if (!infoResponse.ok) await handleApiError(infoResponse);
+            if (!postsResponse.ok) await handleApiError(postsResponse);
+
             const threadInfo = await infoResponse.json();
+            const allPosts = await postsResponse.json();
 
             document.getElementById('thread-title').textContent = threadInfo.title;
             document.getElementById('current-thread-id').value = threadInfo.id;
             
-            if (threadInfo.post_count > 0) {
-                await fetchAllPosts(threadId);
+            if (allPosts.length === 0) {
+                postsContainer.innerHTML = '<p class="no-posts">まだ投稿がありません。</p>';
             } else {
-                document.getElementById('posts-container').innerHTML = '<p class="no-posts">まだ投稿がありません。</p>';
+                renderPosts(allPosts);
             }
         } catch (error) {
           console.error(error);
-          document.getElementById('posts-container').innerHTML = `<p style="color: red; font-weight: bold;">エラー: ${escapeHTML(error.message)}</p>`;
+          postsContainer.innerHTML = `<p style="color: red; font-weight: bold;">エラー: ${escapeHTML(error.message)}</p>`;
         } finally {
           clearTimeout(slowLoadTimer);
           hideLoadingOverlay();
         }
-      }
-
-      async function fetchAllPosts(threadId) {
-          let chunkIndex = 0;
-          while (true) {
-              const response = await fetch(`/api/threads/${threadId}/posts/${chunkIndex}`);
-              if (response.status === 404) {
-                  // これ以上チャンクがないのでループを終了
-                  break;
-              }
-              if (!response.ok) {
-                  await handleApiError(response);
-                  break;
-              }
-
-              const posts = await response.json();
-              if (posts && posts.length > 0) {
-                  renderPosts(posts);
-              } else {
-                  // 念のため空のチャンクが返ってきた場合も終了
-                  break;
-              }
-              chunkIndex++;
-          }
       }
 
       async function createNewThread(event) {
@@ -270,7 +358,6 @@
         const form = event.target;
         const button = form.querySelector('button');
         button.disabled = true;
-        showLoadingOverlay('スレッドを作成中...');
         try {
           const response = await fetch('/api/threads', {
             method: 'POST',
@@ -285,7 +372,7 @@
           form.reset();
           await fetchAndDisplayThreads();
         } catch(error) { console.error(error); alert(error.message); } 
-        finally { button.disabled = false; hideLoadingOverlay(); }
+        finally { button.disabled = false; }
       }
 
       async function createNewPost(event) {
@@ -304,9 +391,7 @@
           });
           if (!response.ok) await handleApiError(response);
           const { post: newPost } = await response.json();
-          
           appendPost(newPost);
-          
           document.getElementById('new-post-body').value = '';
           window.scrollTo(0, document.body.scrollHeight);
         } catch(error) { console.error(error); alert(error.message); } 
