@@ -156,12 +156,16 @@ async function getPostsForThread(request: Request, env: Env, waitUntil: (promise
   return response;
 }
 
+// =================================================================
+// ▼▼▼ ここからが変更された関数です ▼▼▼
+// =================================================================
 async function createPost(context: EventContext<Env, any, any>, threadId: number): Promise<Response> {
   const { request, env, waitUntil } = context;
   
   const { author, body } = await request.json<{ author: string; body: string }>();
   if (!body) return new Response(JSON.stringify({ error: "Body is required." }), { status: 400, headers: { "Content-Type": "application/json" } });
 
+  // 1. スレッドのメタ情報を更新し、新しい投稿番号を取得
   const batchResults = await env.MY_D1_DATABASE2.batch([
     env.MY_D1_DATABASE2.prepare("UPDATE threads SET post_count = post_count + 1, last_updated = CURRENT_TIMESTAMP WHERE id = ? RETURNING post_count").bind(threadId),
     env.MY_D1_DATABASE2.prepare("UPDATE threads_meta SET post_count = post_count + 1, last_updated = CURRENT_TIMESTAMP WHERE id = ?").bind(threadId),
@@ -170,12 +174,12 @@ async function createPost(context: EventContext<Env, any, any>, threadId: number
   const newPostCount = batchResults[0].results[0]?.post_count as number;
   if (!newPostCount) throw new Error("Failed to update thread counters. Thread might not exist.");
 
-  const postResult = await env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body) VALUES (?, ?, ?, ?) RETURNING *")
+  // 2. 新しい投稿をDBに挿入
+  await env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body) VALUES (?, ?, ?, ?)")
     .bind(threadId, newPostCount, author || '名無しさん', body)
-    .first<Post>();
+    .run();
 
-  if (!postResult) throw new Error("Failed to create post.");
-
+  // 3. 関連キャッシュを削除
   const cache = caches.default;
   
   const postsCacheUrl = new URL(request.url);
@@ -190,5 +194,17 @@ async function createPost(context: EventContext<Env, any, any>, threadId: number
   waitUntil(cache.delete(threadsCacheUrl.toString()));
   console.log(`Cache purged for thread list: ${threadsCacheUrl.toString()}`);
   
-  return new Response(JSON.stringify({ success: true, post: postResult }), { status: 201, headers: { "Content-Type": "application/json" } });
+  // 4. 更新後の最新の投稿リスト全体をDBから再取得
+  const { results: allPosts } = await env.MY_D1_DATABASE2.prepare(
+    "SELECT * FROM posts WHERE thread_id = ? ORDER BY post_number ASC"
+  ).bind(threadId).all<Post>();
+
+  // 5. 最新の投稿リストをフロントエンドに返却
+  return new Response(JSON.stringify(allPosts ?? []), { 
+      status: 201, 
+      headers: { "Content-Type": "application/json" } 
+  });
 }
+// =================================================================
+// ▲▲▲ ここまでが変更された関数です ▲▲▲
+// =================================================================

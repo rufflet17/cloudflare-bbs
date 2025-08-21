@@ -383,7 +383,7 @@
         button.disabled = true;
         
         try {
-          // 1. 投稿APIを呼び出す
+          // 1. 投稿APIを呼び出し、レスポンスとして最新の全投稿リストを受け取る
           const response = await fetch(`/api/threads/${threadId}/posts`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -395,28 +395,23 @@
           
           if (!response.ok) await handleApiError(response);
           
-          // 2. 投稿成功後、フォームの内容をクリア
+          // 2. レスポンスのJSON（全投稿リスト）を取得
+          const allPosts = await response.json();
+
+          // 3. 投稿成功後、フォームの内容をクリア
           form.reset(); 
           
-          // 3. ユーザーに状態を通知し、待機
-          showLoadingOverlay('投稿を反映しています...');
+          // 4. 受け取ったデータで投稿コンテナを再描画
+          renderPosts(allPosts);
           
-          // 4. 2秒の待機（D1への反映を待つため）。この時間は環境に応じて調整してください。
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          
-          // 5. スレッド全体を再読み込みして最新の状態を表示
-          await viewThread(threadId);
-          
-          // 6. ページの一番下にスクロール
+          // 5. ページの一番下にスクロール
           window.scrollTo(0, document.body.scrollHeight);
 
         } catch(error) {
           console.error(error);
           alert(error.message);
-          // viewThreadが呼ばれる前にエラーが発生した場合、ローディング画面が残ってしまうため隠す
-          hideLoadingOverlay();
         } finally {
-          // 7. 成功時もエラー時もボタンを再度有効にする
+          // 6. 成功時もエラー時もボタンを再度有効にする
           button.disabled = false;
         }
       }
