@@ -71,7 +71,7 @@
       <button id="back-to-list-btn">&laquo; スレッド一覧に戻る</button>
       <h2 id="thread-title"></h2>
       <div id="posts-container"></div>
-      <div id="load-more-container" style="text-align: center; margin: 20px 0;"></div>
+      <!-- 「もっと読む」ボタンのコンテナを削除 -->
       <hr>
       <h3>レスを書き込む</h3>
       <form id="new-post-form">
@@ -112,13 +112,6 @@
       const threadListContainer = document.getElementById('thread-list');
       const loadingOverlay = document.getElementById('loading-overlay');
       const loadingMessage = document.getElementById('loading-message');
-      const loadMoreContainer = document.getElementById('load-more-container');
-
-      // グローバル状態変数
-      let currentViewingThreadId = null;
-      let currentViewingThreadPostCount = 0;
-      let lastLoadedChunk = -1;
-      const CHUNK_SIZE = 50;
 
       document.getElementById('new-thread-form').addEventListener('submit', createNewThread);
       document.getElementById('new-post-form').addEventListener('submit', createNewPost);
@@ -127,7 +120,6 @@
       // --- ヘルパー関数 ---
       const formatAsLocaleTime = (utcDateString, options = {}) => {
         if (!utcDateString) return '';
-        // 'YYYY-MM-DD HH:MM:SS' を 'YYYY-MM-DDTHH:MM:SSZ' に変換して、UTCとして解釈させる
         const dateAsUTC = new Date(utcDateString.replace(' ', 'T') + 'Z');
         return dateAsUTC.toLocaleString(undefined, options);
       };
@@ -151,11 +143,28 @@
       }
       
       function renderPosts(posts) {
-          posts.sort((a, b) => a.post_number - b.post_number).forEach(post => { appendPost(post); });
+          const postsContainer = document.getElementById('posts-container');
+          const fragment = document.createDocumentFragment();
+          posts.sort((a, b) => a.post_number - b.post_number).forEach(post => {
+            const div = document.createElement('div');
+            div.className = 'post';
+            div.innerHTML = `
+                <div class="post-header">
+                <span>${post.post_number}: ${escapeHTML(post.author || '名無しさん')}</span>
+                <span class="post-date">${formatAsLocaleTime(post.created_at)}</span>
+                </div>
+                <div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>
+            `;
+            fragment.appendChild(div);
+          });
+          postsContainer.appendChild(fragment);
       }
 
       function appendPost(post) {
         const postsContainer = document.getElementById('posts-container');
+        const noPostMsg = postsContainer.querySelector('p.no-posts');
+        if (noPostMsg) noPostMsg.remove();
+
         const div = document.createElement('div');
         div.className = 'post';
         div.innerHTML = `
@@ -165,8 +174,6 @@
             </div>
             <div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>
         `;
-        const noPostMsg = postsContainer.querySelector('p.no-posts');
-        if (noPostMsg) noPostMsg.remove();
         postsContainer.appendChild(div);
       }
 
@@ -206,12 +213,11 @@
         window.scrollTo(0, 0);
 
         document.getElementById('posts-container').innerHTML = '';
-        loadMoreContainer.innerHTML = '';
-        currentViewingThreadId = threadId;
-        lastLoadedChunk = -1;
-        currentViewingThreadPostCount = 0;
         
         showLoadingOverlay('スレッドを読み込んでいます...');
+        let slowLoadTimer = setTimeout(() => {
+            loadingMessage.textContent = '投稿数が多いスレッドは表示に時間がかかることがあります...';
+        }, 800);
 
         try {
             const infoResponse = await fetch(`/api/threads/${threadId}/info`);
@@ -220,10 +226,9 @@
 
             document.getElementById('thread-title').textContent = threadInfo.title;
             document.getElementById('current-thread-id').value = threadInfo.id;
-            currentViewingThreadPostCount = threadInfo.post_count;
-
-            if (currentViewingThreadPostCount > 0) {
-                await loadNextChunk();
+            
+            if (threadInfo.post_count > 0) {
+                await fetchAllPosts(threadId);
             } else {
                 document.getElementById('posts-container').innerHTML = '<p class="no-posts">まだ投稿がありません。</p>';
             }
@@ -231,56 +236,33 @@
           console.error(error);
           document.getElementById('posts-container').innerHTML = `<p style="color: red; font-weight: bold;">エラー: ${escapeHTML(error.message)}</p>`;
         } finally {
+          clearTimeout(slowLoadTimer);
           hideLoadingOverlay();
         }
       }
 
-      async function loadNextChunk() {
-        if (!currentViewingThreadId) return;
-        
-        const nextChunkIndex = lastLoadedChunk + 1;
-        const buttonId = `load-more-btn-${nextChunkIndex}`;
-        const existingButton = document.getElementById(buttonId);
-        if (existingButton) {
-            existingButton.textContent = '読み込み中...';
-            existingButton.disabled = true;
-        }
+      async function fetchAllPosts(threadId) {
+          let chunkIndex = 0;
+          while (true) {
+              const response = await fetch(`/api/threads/${threadId}/posts/${chunkIndex}`);
+              if (response.status === 404) {
+                  // これ以上チャンクがないのでループを終了
+                  break;
+              }
+              if (!response.ok) {
+                  await handleApiError(response);
+                  break;
+              }
 
-        try {
-            const response = await fetch(`/api/threads/${currentViewingThreadId}/posts/${nextChunkIndex}`);
-            if (!response.ok) {
-                if(response.status === 404) {
-                    if (existingButton) existingButton.remove();
-                } else {
-                    await handleApiError(response);
-                }
-                return;
-            }
-            const posts = await response.json();
-            
-            if (posts && posts.length > 0) {
-                renderPosts(posts);
-                lastLoadedChunk = nextChunkIndex;
-            }
-
-            if (existingButton) existingButton.remove();
-            
-            const totalLoadedPosts = document.querySelectorAll('#posts-container .post').length;
-            if (currentViewingThreadPostCount > totalLoadedPosts) {
-                 loadMoreContainer.innerHTML = `<button id="load-more-btn-${lastLoadedChunk + 1}">もっと読む</button>`;
-                 document.getElementById(`load-more-btn-${lastLoadedChunk + 1}`).addEventListener('click', loadNextChunk);
-            } else {
-                loadMoreContainer.innerHTML = '';
-            }
-
-        } catch (error) {
-            console.error(error);
-            alert('投稿の読み込みに失敗しました。');
-            if(existingButton) {
-                existingButton.textContent = 'もっと読む';
-                existingButton.disabled = false;
-            }
-        }
+              const posts = await response.json();
+              if (posts && posts.length > 0) {
+                  renderPosts(posts);
+              } else {
+                  // 念のため空のチャンクが返ってきた場合も終了
+                  break;
+              }
+              chunkIndex++;
+          }
       }
 
       async function createNewThread(event) {
@@ -324,13 +306,7 @@
           const { post: newPost } = await response.json();
           
           appendPost(newPost);
-          currentViewingThreadPostCount++;
-
-          const totalLoadedPosts = document.querySelectorAll('#posts-container .post').length;
-          if (currentViewingThreadPostCount <= totalLoadedPosts) {
-              loadMoreContainer.innerHTML = '';
-          }
-
+          
           document.getElementById('new-post-body').value = '';
           window.scrollTo(0, document.body.scrollHeight);
         } catch(error) { console.error(error); alert(error.message); } 
@@ -340,7 +316,6 @@
       function showThreadList() {
         threadContentView.style.display = 'none';
         threadListView.style.display = 'block';
-        currentViewingThreadId = null;
         fetchAndDisplayThreads();
       }
 
