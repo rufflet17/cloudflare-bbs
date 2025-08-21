@@ -197,6 +197,7 @@
       <button id="back-to-list-btn">&laquo; スレッド一覧に戻る</button>
       <h2 id="thread-title"></h2>
       <div id="posts-container"></div>
+      <div id="load-more-container" style="text-align: center; margin: 20px 0;"></div>
       <hr>
       <h3>レスを書き込む</h3>
       <form id="new-post-form">
@@ -237,6 +238,13 @@
       const threadListContainer = document.getElementById('thread-list');
       const loadingOverlay = document.getElementById('loading-overlay');
       const loadingMessage = document.getElementById('loading-message');
+      const loadMoreContainer = document.getElementById('load-more-container');
+
+      // グローバル状態変数
+      let currentViewingThreadId = null;
+      let currentViewingThreadPostCount = 0;
+      let lastLoadedChunk = -1;
+      const CHUNK_SIZE = 50; // バックエンドと値を合わせる
 
       document.getElementById('new-thread-form').addEventListener('submit', createNewThread);
       document.getElementById('new-post-form').addEventListener('submit', createNewPost);
@@ -261,8 +269,6 @@
       }
       
       function renderPosts(posts) {
-          const postsContainer = document.getElementById('posts-container');
-          postsContainer.innerHTML = '';
           posts.sort((a, b) => a.post_number - b.post_number).forEach(post => { appendPost(post); });
       }
 
@@ -316,40 +322,84 @@
         threadListView.style.display = 'none';
         threadContentView.style.display = 'block';
         window.scrollTo(0, 0);
-        const postsContainer = document.getElementById('posts-container');
-        postsContainer.innerHTML = '';
+
+        // 状態をリセット
+        document.getElementById('posts-container').innerHTML = '';
+        loadMoreContainer.innerHTML = '';
+        currentViewingThreadId = threadId;
+        lastLoadedChunk = -1;
+        currentViewingThreadPostCount = 0;
         
         showLoadingOverlay('スレッドを読み込んでいます...');
-        let slowLoadTimer = setTimeout(() => {
-            loadingMessage.textContent = '長期間アクセスが無いスレッドは表示に時間がかかります。データを準備しています...';
-        }, 800);
 
         try {
-            const infoPromise = fetch(`/api/threads/${threadId}/info`);
-            const postsPromise = fetch(`/api/threads/${threadId}/posts`);
-
-            const [infoResponse, postsResponse] = await Promise.all([infoPromise, postsPromise]);
-
+            // スレッド情報をまず取得して総投稿数などを把握
+            const infoResponse = await fetch(`/api/threads/${threadId}/info`);
             if (!infoResponse.ok) await handleApiError(infoResponse);
-            if (!postsResponse.ok) await handleApiError(postsResponse);
-
             const threadInfo = await infoResponse.json();
-            const allPosts = await postsResponse.json();
 
             document.getElementById('thread-title').textContent = threadInfo.title;
             document.getElementById('current-thread-id').value = threadInfo.id;
-            
-            if (allPosts.length === 0) {
-                postsContainer.innerHTML = '<p class="no-posts">まだ投稿がありません。</p>';
+            currentViewingThreadPostCount = threadInfo.post_count;
+
+            if (currentViewingThreadPostCount > 0) {
+                // 最初のチャンクを読み込む
+                await loadNextChunk();
             } else {
-                renderPosts(allPosts);
+                document.getElementById('posts-container').innerHTML = '<p class="no-posts">まだ投稿がありません。</p>';
             }
         } catch (error) {
           console.error(error);
-          postsContainer.innerHTML = `<p style="color: red; font-weight: bold;">エラー: ${escapeHTML(error.message)}</p>`;
+          document.getElementById('posts-container').innerHTML = `<p style="color: red; font-weight: bold;">エラー: ${escapeHTML(error.message)}</p>`;
         } finally {
-          clearTimeout(slowLoadTimer);
           hideLoadingOverlay();
+        }
+      }
+
+      async function loadNextChunk() {
+        if (!currentViewingThreadId) return;
+        
+        const nextChunkIndex = lastLoadedChunk + 1;
+        const buttonId = `load-more-btn-${nextChunkIndex}`;
+        const existingButton = document.getElementById(buttonId);
+        if (existingButton) {
+            existingButton.textContent = '読み込み中...';
+            existingButton.disabled = true;
+        }
+
+        try {
+            const response = await fetch(`/api/threads/${currentViewingThreadId}/posts/${nextChunkIndex}`);
+            if (!response.ok) {
+                if(response.status === 404) {
+                    if (existingButton) existingButton.remove();
+                    console.log(`Chunk ${nextChunkIndex} not found. Reached the end.`);
+                } else {
+                    await handleApiError(response);
+                }
+                return;
+            }
+            const posts = await response.json();
+            
+            if (posts.length > 0) {
+                renderPosts(posts);
+                lastLoadedChunk = nextChunkIndex;
+            }
+
+            // 「もっと読む」ボタンの表示制御
+            if (existingButton) existingButton.remove();
+            
+            const totalLoadedPosts = document.querySelectorAll('#posts-container .post').length;
+            if (currentViewingThreadPostCount > totalLoadedPosts) {
+                 loadMoreContainer.innerHTML = `<button id="load-more-btn-${lastLoadedChunk + 1}">もっと読む</button>`;
+                 document.getElementById(`load-more-btn-${lastLoadedChunk + 1}`).addEventListener('click', loadNextChunk);
+            }
+        } catch (error) {
+            console.error(error);
+            alert('投稿の読み込みに失敗しました。');
+            if(existingButton) {
+                existingButton.textContent = 'もっと読む';
+                existingButton.disabled = false;
+            }
         }
       }
 
@@ -358,6 +408,7 @@
         const form = event.target;
         const button = form.querySelector('button');
         button.disabled = true;
+        showLoadingOverlay('スレッドを作成中...');
         try {
           const response = await fetch('/api/threads', {
             method: 'POST',
@@ -372,7 +423,7 @@
           form.reset();
           await fetchAndDisplayThreads();
         } catch(error) { console.error(error); alert(error.message); } 
-        finally { button.disabled = false; }
+        finally { button.disabled = false; hideLoadingOverlay(); }
       }
 
       async function createNewPost(event) {
@@ -391,7 +442,10 @@
           });
           if (!response.ok) await handleApiError(response);
           const { post: newPost } = await response.json();
+          
           appendPost(newPost);
+          currentViewingThreadPostCount++; // 総投稿数をインクリメント
+
           document.getElementById('new-post-body').value = '';
           window.scrollTo(0, document.body.scrollHeight);
         } catch(error) { console.error(error); alert(error.message); } 
@@ -401,6 +455,7 @@
       function showThreadList() {
         threadContentView.style.display = 'none';
         threadListView.style.display = 'block';
+        currentViewingThreadId = null; // 状態をリセット
         fetchAndDisplayThreads();
       }
 
