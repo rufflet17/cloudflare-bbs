@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cloudflare BBS</title>
   <style>
-    /* 1. CSS変数 (テーマの定義) */
+    /* (CSSは変更なし) */
     :root {
       --font-classic: 'MS PGothic', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
       --font-modern: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Sans', 'Noto Sans CJK JP', 'Noto Sans JP', sans-serif;
@@ -47,7 +47,6 @@
       --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
     }
     
-    /* 2. 基本スタイル (CSS変数を適用) */
     body { 
       font-family: var(--font-family); 
       background-color: var(--bg-color); 
@@ -106,7 +105,6 @@
     button:hover { background-color: var(--link-hover-color); }
     button:disabled { background-color: #6c757d; cursor: not-allowed; }
     
-    /* テーマ切り替えボタン */
     .theme-switcher { margin-bottom: 10px; text-align: right; }
     .theme-switcher button {
       padding: 5px 10px;
@@ -143,7 +141,6 @@
     .post-header .post-date { color: var(--post-meta-color); font-weight: normal; margin-left: 10px; }
     .post-body { margin-left: 1em; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
     
-    /* モダンテーマ専用スタイル */
     body[data-theme="modern"] .post {
       border-left: none;
       padding: 15px;
@@ -157,7 +154,6 @@
     
     #back-to-list-btn { margin-bottom: 15px; }
 
-    /* ローディングオーバーレイ */
     #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(255, 255, 255, 0.85); z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; color: #333; font-size: 1.1em; text-align: center; }
     .loading-spinner { border: 4px solid #f3f3f3; border-top: 4px solid var(--link-color); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 20px; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -375,13 +371,20 @@
         finally { button.disabled = false; }
       }
 
+      // =================================================================
+      // ▼▼▼ ここからが変更された関数です ▼▼▼
+      // =================================================================
       async function createNewPost(event) {
         event.preventDefault();
         const form = event.target;
         const button = form.querySelector('button');
+        const threadId = document.getElementById('current-thread-id').value;
+        
         button.disabled = true;
+        
         try {
-          const response = await fetch(`/api/threads/${document.getElementById('current-thread-id').value}/posts`, {
+          // 1. 投稿APIを呼び出す
+          const response = await fetch(`/api/threads/${threadId}/posts`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -389,14 +392,37 @@
               body: document.getElementById('new-post-body').value
             })
           });
+          
           if (!response.ok) await handleApiError(response);
-          const { post: newPost } = await response.json();
-          appendPost(newPost);
-          document.getElementById('new-post-body').value = '';
+          
+          // 2. 投稿成功後、フォームの内容をクリア
+          form.reset(); 
+          
+          // 3. ユーザーに状態を通知し、待機
+          showLoadingOverlay('投稿を反映しています...');
+          
+          // 4. 2秒の待機（D1への反映を待つため）。この時間は環境に応じて調整してください。
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          // 5. スレッド全体を再読み込みして最新の状態を表示
+          await viewThread(threadId);
+          
+          // 6. ページの一番下にスクロール
           window.scrollTo(0, document.body.scrollHeight);
-        } catch(error) { console.error(error); alert(error.message); } 
-        finally { button.disabled = false; }
+
+        } catch(error) {
+          console.error(error);
+          alert(error.message);
+          // viewThreadが呼ばれる前にエラーが発生した場合、ローディング画面が残ってしまうため隠す
+          hideLoadingOverlay();
+        } finally {
+          // 7. 成功時もエラー時もボタンを再度有効にする
+          button.disabled = false;
+        }
       }
+      // =================================================================
+      // ▲▲▲ ここまでが変更された関数です ▲▲▲
+      // =================================================================
 
       function showThreadList() {
         threadContentView.style.display = 'none';
