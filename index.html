@@ -5,17 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cloudflare BBS</title>
   <style>
-    /* CSSは変更なし */
-    :root {
-      --font-classic: 'MS PGothic', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
-      --font-modern: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Sans', 'Noto Sans CJK JP', 'Noto Sans JP', sans-serif;
-    }
-    body[data-theme="classic"] {
-      --font-family: var(--font-classic); --bg-color: #efefef; --main-bg-color: #fff; --text-color: #333; --header-bg-color: #ddd; --border-color: #ccc; --accent-color: #99c; --link-color: #007bff; --link-hover-color: #0056b3; --post-name-color: #006400; --post-meta-color: #555; --post-border-color: #eee; --thread-hover-bg: #f0f8ff; --card-radius: 0px; --card-shadow: none;
-    }
-    body[data-theme="modern"] {
-      --font-family: var(--font-modern); --bg-color: #f4f7f9; --main-bg-color: #ffffff; --text-color: #2c3e50; --header-bg-color: #ffffff; --border-color: #e0e6ed; --accent-color: #3498db; --link-color: #3498db; --link-hover-color: #2980b9; --post-name-color: #27ae60; --post-meta-color: #7f8c8d; --post-border-color: transparent; --thread-hover-bg: #ecf5ff; --card-radius: 8px; --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-    }
+    :root { --font-classic: 'MS PGothic', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif; --font-modern: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Sans', 'Noto Sans CJK JP', 'Noto Sans JP', sans-serif; }
+    body[data-theme="classic"] { --font-family: var(--font-classic); --bg-color: #efefef; --main-bg-color: #fff; --text-color: #333; --header-bg-color: #ddd; --border-color: #ccc; --accent-color: #99c; --link-color: #007bff; --link-hover-color: #0056b3; --post-name-color: #006400; --post-meta-color: #555; --post-border-color: #eee; --thread-hover-bg: #f0f8ff; --card-radius: 0px; --card-shadow: none; }
+    body[data-theme="modern"] { --font-family: var(--font-modern); --bg-color: #f4f7f9; --main-bg-color: #ffffff; --text-color: #2c3e50; --header-bg-color: #ffffff; --border-color: #e0e6ed; --accent-color: #3498db; --link-color: #3498db; --link-hover-color: #2980b9; --post-name-color: #27ae60; --post-meta-color: #7f8c8d; --post-border-color: transparent; --thread-hover-bg: #ecf5ff; --card-radius: 8px; --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.05); }
     body { font-family: var(--font-family); background-color: var(--bg-color); color: var(--text-color); margin: 0; transition: background-color 0.2s, color 0.2s; }
     header { background-color: var(--header-bg-color); padding: 10px; text-align: center; border-bottom: 1px solid var(--border-color); box-shadow: var(--card-shadow); position: sticky; top: 0; z-index: 10; }
     main { max-width: 800px; margin: 20px auto; background-color: var(--main-bg-color); padding: 20px; border: 1px solid var(--border-color); border-radius: var(--card-radius); }
@@ -131,6 +123,14 @@
       document.getElementById('new-thread-form').addEventListener('submit', createNewThread);
       document.getElementById('new-post-form').addEventListener('submit', createNewPost);
       document.getElementById('back-to-list-btn').addEventListener('click', showThreadList);
+      
+      // --- ヘルパー関数 ---
+      const formatAsLocaleTime = (utcDateString, options = {}) => {
+        if (!utcDateString) return '';
+        // 'YYYY-MM-DD HH:MM:SS' を 'YYYY-MM-DDTHH:MM:SSZ' に変換して、UTCとして解釈させる
+        const dateAsUTC = new Date(utcDateString.replace(' ', 'T') + 'Z');
+        return dateAsUTC.toLocaleString(undefined, options);
+      };
 
       const escapeHTML = (str) => str.replace(/[&<>"']/g, (match) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[match]));
       
@@ -161,8 +161,7 @@
         div.innerHTML = `
             <div class="post-header">
             <span>${post.post_number}: ${escapeHTML(post.author || '名無しさん')}</span>
-            <!-- ★★★ 修正点1 ★★★ -->
-            <span class="post-date">${new Date(post.created_at).toLocaleString()}</span>
+            <span class="post-date">${formatAsLocaleTime(post.created_at)}</span>
             </div>
             <div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>
         `;
@@ -188,8 +187,7 @@
                   </div>
                   <div class="thread-meta">
                     レス: ${thread.post_count}<br>
-                    <!-- ★★★ 修正点2 ★★★ -->
-                    更新: ${new Date(thread.last_updated).toLocaleString(undefined, { year:'2-digit', month:'2-digit', day:'2-digit', hour: '2-digit', minute: '2-digit'})}
+                    更新: ${formatAsLocaleTime(thread.last_updated, { year:'2-digit', month:'2-digit', day:'2-digit', hour: '2-digit', minute: '2-digit'})}
                   </div>`;
                 div.dataset.threadId = thread.id;
                 div.addEventListener('click', () => viewThread(thread.id));
@@ -202,24 +200,28 @@
         finally { clearTimeout(loadingTimer); hideLoadingOverlay(); }
       }
 
-      // viewThread, loadNextChunk, createNewThread, createNewPost, showThreadList は変更なし
       async function viewThread(threadId) {
         threadListView.style.display = 'none';
         threadContentView.style.display = 'block';
         window.scrollTo(0, 0);
+
         document.getElementById('posts-container').innerHTML = '';
         loadMoreContainer.innerHTML = '';
         currentViewingThreadId = threadId;
         lastLoadedChunk = -1;
         currentViewingThreadPostCount = 0;
+        
         showLoadingOverlay('スレッドを読み込んでいます...');
+
         try {
             const infoResponse = await fetch(`/api/threads/${threadId}/info`);
             if (!infoResponse.ok) await handleApiError(infoResponse);
             const threadInfo = await infoResponse.json();
+
             document.getElementById('thread-title').textContent = threadInfo.title;
             document.getElementById('current-thread-id').value = threadInfo.id;
             currentViewingThreadPostCount = threadInfo.post_count;
+
             if (currentViewingThreadPostCount > 0) {
                 await loadNextChunk();
             } else {
@@ -232,8 +234,10 @@
           hideLoadingOverlay();
         }
       }
+
       async function loadNextChunk() {
         if (!currentViewingThreadId) return;
+        
         const nextChunkIndex = lastLoadedChunk + 1;
         const buttonId = `load-more-btn-${nextChunkIndex}`;
         const existingButton = document.getElementById(buttonId);
@@ -241,28 +245,34 @@
             existingButton.textContent = '読み込み中...';
             existingButton.disabled = true;
         }
+
         try {
             const response = await fetch(`/api/threads/${currentViewingThreadId}/posts/${nextChunkIndex}`);
             if (!response.ok) {
                 if(response.status === 404) {
                     if (existingButton) existingButton.remove();
-                    console.log(`Chunk ${nextChunkIndex} not found. Reached the end.`);
                 } else {
                     await handleApiError(response);
                 }
                 return;
             }
             const posts = await response.json();
-            if (posts.length > 0) {
+            
+            if (posts && posts.length > 0) {
                 renderPosts(posts);
                 lastLoadedChunk = nextChunkIndex;
             }
+
             if (existingButton) existingButton.remove();
+            
             const totalLoadedPosts = document.querySelectorAll('#posts-container .post').length;
             if (currentViewingThreadPostCount > totalLoadedPosts) {
                  loadMoreContainer.innerHTML = `<button id="load-more-btn-${lastLoadedChunk + 1}">もっと読む</button>`;
                  document.getElementById(`load-more-btn-${lastLoadedChunk + 1}`).addEventListener('click', loadNextChunk);
+            } else {
+                loadMoreContainer.innerHTML = '';
             }
+
         } catch (error) {
             console.error(error);
             alert('投稿の読み込みに失敗しました。');
@@ -272,6 +282,7 @@
             }
         }
       }
+
       async function createNewThread(event) {
         event.preventDefault();
         const form = event.target;
@@ -294,6 +305,7 @@
         } catch(error) { console.error(error); alert(error.message); } 
         finally { button.disabled = false; hideLoadingOverlay(); }
       }
+
       async function createNewPost(event) {
         event.preventDefault();
         const form = event.target;
@@ -310,13 +322,21 @@
           });
           if (!response.ok) await handleApiError(response);
           const { post: newPost } = await response.json();
+          
           appendPost(newPost);
           currentViewingThreadPostCount++;
+
+          const totalLoadedPosts = document.querySelectorAll('#posts-container .post').length;
+          if (currentViewingThreadPostCount <= totalLoadedPosts) {
+              loadMoreContainer.innerHTML = '';
+          }
+
           document.getElementById('new-post-body').value = '';
           window.scrollTo(0, document.body.scrollHeight);
         } catch(error) { console.error(error); alert(error.message); } 
         finally { button.disabled = false; }
       }
+
       function showThreadList() {
         threadContentView.style.display = 'none';
         threadListView.style.display = 'block';

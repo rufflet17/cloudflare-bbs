@@ -4,7 +4,7 @@
 // -----------------------------------------------------------------------------
 interface Env {
   MY_D1_DATABASE2: D1Database;
-  MY_R2_BUCKET2: R2Bucket; // R2バインディング名を指定
+  MY_R2_BUCKET2: R2Bucket;
 }
 
 interface Thread {
@@ -22,13 +22,12 @@ interface Post {
   created_at: string;
 }
 
-const CHUNK_SIZE = 50; // 1チャンクあたりのレス数
+const CHUNK_SIZE = 50;
 const CACHE_TTL = 60 * 60 * 24 * 7; // キャッシュ期間: 7日間
-const THREAD_LIST_CACHE_TTL = 30;
+const THREAD_LIST_CACHE_TTL = 30; // スレッド一覧のキャッシュ時間: 30秒
 
-// ヘルパー関数: 投稿番号からチャンクインデックスを計算
+// ヘルパー関数
 const getChunkIndex = (postNumber: number) => Math.floor((postNumber - 1) / CHUNK_SIZE);
-// ヘルパー関数: R2のオブジェクトキーを生成
 const getR2Key = (threadId: number, chunkIndex: number) => `posts/${threadId}/chunk-${chunkIndex}.json`;
 
 // 2. メインハンドラ (リクエストのルーティング)
@@ -53,7 +52,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return await getThreadInfo(env, threadId);
     }
     
-    // チャンク単位で投稿を取得する新しいエンドポイント
     const postsChunkMatch = path.match(/^\/api\/threads\/(\d+)\/posts\/(\d+)$/);
     if (method === 'GET' && postsChunkMatch) {
       const threadId = parseInt(postsChunkMatch[1], 10);
@@ -61,7 +59,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return await getPostsChunk(request, env, waitUntil, threadId, chunkIndex);
     }
     
-    // 投稿作成エンドポイント
     const postsMatch = path.match(/^\/api\/threads\/(\d+)\/posts$/);
     if (method === 'POST' && postsMatch) {
       const threadId = parseInt(postsMatch[1], 10);
@@ -90,21 +87,16 @@ async function getThreads(request: Request, env: Env, waitUntil: (promise: Promi
   const cacheKey = new Request(request.url, request);
 
   const cachedResponse = await cache.match(cacheKey);
-  if (cachedResponse) {
-    console.log("Cache hit for thread list");
-    return cachedResponse;
-  }
-  console.log("Cache miss for thread list");
+  if (cachedResponse) return cachedResponse;
 
   const { results } = await env.MY_D1_DATABASE2.prepare(
     "SELECT id, title, post_count, last_updated FROM threads_meta ORDER BY last_updated DESC LIMIT 50"
   ).all<Thread>();
   
   const response = new Response(JSON.stringify(results ?? []), {
-    headers: { "Content-Type": "application/json" }
+    headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${THREAD_LIST_CACHE_TTL}` }
   });
 
-  response.headers.set("Cache-Control", `public, max-age=${THREAD_LIST_CACHE_TTL}`);
   waitUntil(cache.put(cacheKey, response.clone()));
   
   return response;
@@ -146,13 +138,8 @@ async function createThread(request: Request, env: Env, waitUntil: (promise: Pro
 async function getPostsChunk(request: Request, env: Env, waitUntil: (promise: Promise<any>) => void, threadId: number, chunkIndex: number): Promise<Response> {
   const cache = caches.default;
   const cacheKey = new Request(request.url, request);
-
   const cachedResponse = await cache.match(cacheKey);
-  if (cachedResponse) {
-    console.log(`Cache hit for thread ${threadId}, chunk ${chunkIndex}`);
-    return cachedResponse;
-  }
-  console.log(`Cache miss for thread ${threadId}, chunk ${chunkIndex}`);
+  if (cachedResponse) return cachedResponse;
 
   const threadInfo = await env.MY_D1_DATABASE2.prepare("SELECT post_count FROM threads WHERE id = ?").bind(threadId).first<{ post_count: number }>();
   if (!threadInfo) return new Response(JSON.stringify({ error: "Thread not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
@@ -161,17 +148,23 @@ async function getPostsChunk(request: Request, env: Env, waitUntil: (promise: Pr
   let posts: Post[] | null = null;
   
   if (chunkIndex === currentChunkIndex) {
-    console.log(`Fetching chunk ${chunkIndex} from D1 for thread ${threadId}`);
     const { results } = await env.MY_D1_DATABASE2.prepare(
       "SELECT * FROM posts WHERE thread_id = ? AND post_number > ? ORDER BY post_number ASC"
     ).bind(threadId, chunkIndex * CHUNK_SIZE).all<Post>();
     posts = results;
   } else if (chunkIndex < currentChunkIndex) {
-    console.log(`Fetching chunk ${chunkIndex} from R2 for thread ${threadId}`);
     const r2Key = getR2Key(threadId, chunkIndex);
-    const object = await env.MY_R2_BUCKET2.get(r2Key); // R2 binding name
+    const object = await env.MY_R2_BUCKET2.get(r2Key);
     if (object) {
       posts = await object.json<Post[]>();
+    } else {
+      console.warn(`Chunk ${chunkIndex} not found in R2. Falling back to D1 for thread ${threadId}`);
+      const startPostNumber = chunkIndex * CHUNK_SIZE + 1;
+      const endPostNumber = startPostNumber + CHUNK_SIZE - 1;
+      const { results } = await env.MY_D1_DATABASE2.prepare(
+          "SELECT * FROM posts WHERE thread_id = ? AND post_number BETWEEN ? AND ? ORDER BY post_number ASC"
+      ).bind(threadId, startPostNumber, endPostNumber).all<Post>();
+      posts = results;
     }
   }
 
@@ -180,13 +173,9 @@ async function getPostsChunk(request: Request, env: Env, waitUntil: (promise: Pr
   }
 
   const response = new Response(JSON.stringify(posts), {
-    headers: { 
-      "Content-Type": "application/json",
-      "Cache-Control": `public, max-age=${CACHE_TTL}`
-    }
+    headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${CACHE_TTL}` }
   });
   waitUntil(cache.put(cacheKey, response.clone()));
-  
   return response;
 }
 
@@ -217,10 +206,8 @@ async function createPost(context: EventContext<Env, any, any>, threadId: number
 
 async function handlePostCreationTasks(env: Env, request: Request, threadId: number, newPostCount: number): Promise<void> {
     const cache = caches.default;
-
     const requestUrl = new URL(request.url);
     const origin = `${requestUrl.protocol}//${requestUrl.host}`;
-
     const threadsCacheUrl = new URL('/api/threads', origin);
     await cache.delete(threadsCacheUrl.toString());
     console.log(`Cache purged for thread list`);
@@ -260,7 +247,7 @@ async function archiveAndCleanChunk(env: Env, threadId: number, chunkIndex: numb
   }
 
   const r2Key = getR2Key(threadId, chunkIndex);
-  await env.MY_R2_BUCKET2.put(r2Key, JSON.stringify(postsToArchive), { // R2 binding name
+  await env.MY_R2_BUCKET2.put(r2Key, JSON.stringify(postsToArchive), {
       httpMetadata: { contentType: 'application/json' },
   });
   console.log(`Successfully archived ${postsToArchive.length} posts to R2 at key: ${r2Key}`);
