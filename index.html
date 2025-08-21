@@ -5,159 +5,41 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cloudflare BBS</title>
   <style>
-    /* 1. CSS変数 (テーマの定義) */
+    /* CSSは変更なし */
     :root {
       --font-classic: 'MS PGothic', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
       --font-modern: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Sans', 'Noto Sans CJK JP', 'Noto Sans JP', sans-serif;
     }
-
     body[data-theme="classic"] {
-      --font-family: var(--font-classic);
-      --bg-color: #efefef;
-      --main-bg-color: #fff;
-      --text-color: #333;
-      --header-bg-color: #ddd;
-      --border-color: #ccc;
-      --accent-color: #99c;
-      --link-color: #007bff;
-      --link-hover-color: #0056b3;
-      --post-name-color: #006400;
-      --post-meta-color: #555;
-      --post-border-color: #eee;
-      --thread-hover-bg: #f0f8ff;
-      --card-radius: 0px;
-      --card-shadow: none;
+      --font-family: var(--font-classic); --bg-color: #efefef; --main-bg-color: #fff; --text-color: #333; --header-bg-color: #ddd; --border-color: #ccc; --accent-color: #99c; --link-color: #007bff; --link-hover-color: #0056b3; --post-name-color: #006400; --post-meta-color: #555; --post-border-color: #eee; --thread-hover-bg: #f0f8ff; --card-radius: 0px; --card-shadow: none;
     }
-
     body[data-theme="modern"] {
-      --font-family: var(--font-modern);
-      --bg-color: #f4f7f9;
-      --main-bg-color: #ffffff;
-      --text-color: #2c3e50;
-      --header-bg-color: #ffffff;
-      --border-color: #e0e6ed;
-      --accent-color: #3498db;
-      --link-color: #3498db;
-      --link-hover-color: #2980b9;
-      --post-name-color: #27ae60;
-      --post-meta-color: #7f8c8d;
-      --post-border-color: transparent;
-      --thread-hover-bg: #ecf5ff;
-      --card-radius: 8px;
-      --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+      --font-family: var(--font-modern); --bg-color: #f4f7f9; --main-bg-color: #ffffff; --text-color: #2c3e50; --header-bg-color: #ffffff; --border-color: #e0e6ed; --accent-color: #3498db; --link-color: #3498db; --link-hover-color: #2980b9; --post-name-color: #27ae60; --post-meta-color: #7f8c8d; --post-border-color: transparent; --thread-hover-bg: #ecf5ff; --card-radius: 8px; --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
     }
-    
-    /* 2. 基本スタイル (CSS変数を適用) */
-    body { 
-      font-family: var(--font-family); 
-      background-color: var(--bg-color); 
-      color: var(--text-color); 
-      margin: 0;
-      transition: background-color 0.2s, color 0.2s;
-    }
-    header { 
-      background-color: var(--header-bg-color); 
-      padding: 10px; 
-      text-align: center; 
-      border-bottom: 1px solid var(--border-color);
-      box-shadow: var(--card-shadow);
-      position: sticky;
-      top: 0;
-      z-index: 10;
-    }
-    main { 
-      max-width: 800px; 
-      margin: 20px auto; 
-      background-color: var(--main-bg-color); 
-      padding: 20px; 
-      border: 1px solid var(--border-color);
-      border-radius: var(--card-radius);
-    }
-    h2, h3 { 
-      border-bottom: 2px solid var(--accent-color); 
-      padding-bottom: 5px;
-    }
+    body { font-family: var(--font-family); background-color: var(--bg-color); color: var(--text-color); margin: 0; transition: background-color 0.2s, color 0.2s; }
+    header { background-color: var(--header-bg-color); padding: 10px; text-align: center; border-bottom: 1px solid var(--border-color); box-shadow: var(--card-shadow); position: sticky; top: 0; z-index: 10; }
+    main { max-width: 800px; margin: 20px auto; background-color: var(--main-bg-color); padding: 20px; border: 1px solid var(--border-color); border-radius: var(--card-radius); }
+    h2, h3 { border-bottom: 2px solid var(--accent-color); padding-bottom: 5px; }
     form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
-    input, textarea { 
-      padding: 10px; 
-      border: 1px solid var(--border-color); 
-      border-radius: 4px; 
-      font-family: inherit; 
-      font-size: 1em;
-      background-color: var(--bg-color);
-      color: var(--text-color);
-    }
-    input:focus, textarea:focus {
-        outline: none;
-        border-color: var(--link-color);
-        box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
-    }
-    button { 
-      padding: 10px; 
-      background-color: var(--link-color); 
-      color: white; 
-      border: none; 
-      cursor: pointer; 
-      border-radius: 4px;
-      font-size: 1em;
-      font-weight: bold;
-      transition: background-color 0.2s;
-    }
+    input, textarea { padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; font-family: inherit; font-size: 1em; background-color: var(--bg-color); color: var(--text-color); }
+    input:focus, textarea:focus { outline: none; border-color: var(--link-color); box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2); }
+    button { padding: 10px; background-color: var(--link-color); color: white; border: none; cursor: pointer; border-radius: 4px; font-size: 1em; font-weight: bold; transition: background-color 0.2s; }
     button:hover { background-color: var(--link-hover-color); }
     button:disabled { background-color: #6c757d; cursor: not-allowed; }
-    
-    /* テーマ切り替えボタン */
     .theme-switcher { margin-bottom: 10px; text-align: right; }
-    .theme-switcher button {
-      padding: 5px 10px;
-      font-size: 0.8em;
-      margin-left: 5px;
-      background-color: #ccc;
-      color: #333;
-      font-weight: normal;
-    }
-    .theme-switcher button.active {
-      background-color: var(--link-color);
-      color: white;
-    }
-
-    #thread-list .thread-item { 
-      cursor: pointer; 
-      padding: 10px; 
-      border-bottom: 1px dotted var(--border-color); 
-      display: flex; 
-      justify-content: space-between; 
-      align-items: center;
-      transition: background-color 0.2s;
-    }
+    .theme-switcher button { padding: 5px 10px; font-size: 0.8em; margin-left: 5px; background-color: #ccc; color: #333; font-weight: normal; }
+    .theme-switcher button.active { background-color: var(--link-color); color: white; }
+    #thread-list .thread-item { cursor: pointer; padding: 10px; border-bottom: 1px dotted var(--border-color); display: flex; justify-content: space-between; align-items: center; transition: background-color 0.2s; }
     #thread-list .thread-item:hover { background-color: var(--thread-hover-bg); }
     .thread-details { flex-grow: 1; }
     .thread-meta { font-size: 0.8em; color: #666; text-align: right; white-space: nowrap; }
-    
-    .post { 
-      margin-bottom: 15px; 
-      padding-left: 10px; 
-      border-left: 3px solid var(--post-border-color); 
-    }
+    .post { margin-bottom: 15px; padding-left: 10px; border-left: 3px solid var(--post-border-color); }
     .post-header { font-size: 0.9em; color: var(--post-name-color); font-weight: bold; }
     .post-header .post-date { color: var(--post-meta-color); font-weight: normal; margin-left: 10px; }
     .post-body { margin-left: 1em; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
-    
-    /* モダンテーマ専用スタイル */
-    body[data-theme="modern"] .post {
-      border-left: none;
-      padding: 15px;
-      background-color: var(--bg-color);
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-    }
-    body[data-theme="modern"] .post-body {
-        margin-left: 0;
-    }
-    
+    body[data-theme="modern"] .post { border-left: none; padding: 15px; background-color: var(--bg-color); border: 1px solid var(--border-color); border-radius: 6px; }
+    body[data-theme="modern"] .post-body { margin-left: 0; }
     #back-to-list-btn { margin-bottom: 15px; }
-
-    /* ローディングオーバーレイ */
     #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(255, 255, 255, 0.85); z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; color: #333; font-size: 1.1em; text-align: center; }
     .loading-spinner { border: 4px solid #f3f3f3; border-top: 4px solid var(--link-color); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 20px; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -244,7 +126,7 @@
       let currentViewingThreadId = null;
       let currentViewingThreadPostCount = 0;
       let lastLoadedChunk = -1;
-      const CHUNK_SIZE = 50; // バックエンドと値を合わせる
+      const CHUNK_SIZE = 50;
 
       document.getElementById('new-thread-form').addEventListener('submit', createNewThread);
       document.getElementById('new-post-form').addEventListener('submit', createNewPost);
@@ -279,7 +161,8 @@
         div.innerHTML = `
             <div class="post-header">
             <span>${post.post_number}: ${escapeHTML(post.author || '名無しさん')}</span>
-            <span class="post-date">${new Date(post.created_at).toLocaleString('ja-JP')}</span>
+            <!-- ★★★ 修正点1 ★★★ -->
+            <span class="post-date">${new Date(post.created_at).toLocaleString()}</span>
             </div>
             <div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>
         `;
@@ -305,7 +188,8 @@
                   </div>
                   <div class="thread-meta">
                     レス: ${thread.post_count}<br>
-                    更新: ${new Date(thread.last_updated).toLocaleString('ja-JP', { year:'2-digit', month:'2-digit', day:'2-digit', hour: '2-digit', minute: '2-digit'})}
+                    <!-- ★★★ 修正点2 ★★★ -->
+                    更新: ${new Date(thread.last_updated).toLocaleString(undefined, { year:'2-digit', month:'2-digit', day:'2-digit', hour: '2-digit', minute: '2-digit'})}
                   </div>`;
                 div.dataset.threadId = thread.id;
                 div.addEventListener('click', () => viewThread(thread.id));
@@ -318,32 +202,25 @@
         finally { clearTimeout(loadingTimer); hideLoadingOverlay(); }
       }
 
+      // viewThread, loadNextChunk, createNewThread, createNewPost, showThreadList は変更なし
       async function viewThread(threadId) {
         threadListView.style.display = 'none';
         threadContentView.style.display = 'block';
         window.scrollTo(0, 0);
-
-        // 状態をリセット
         document.getElementById('posts-container').innerHTML = '';
         loadMoreContainer.innerHTML = '';
         currentViewingThreadId = threadId;
         lastLoadedChunk = -1;
         currentViewingThreadPostCount = 0;
-        
         showLoadingOverlay('スレッドを読み込んでいます...');
-
         try {
-            // スレッド情報をまず取得して総投稿数などを把握
             const infoResponse = await fetch(`/api/threads/${threadId}/info`);
             if (!infoResponse.ok) await handleApiError(infoResponse);
             const threadInfo = await infoResponse.json();
-
             document.getElementById('thread-title').textContent = threadInfo.title;
             document.getElementById('current-thread-id').value = threadInfo.id;
             currentViewingThreadPostCount = threadInfo.post_count;
-
             if (currentViewingThreadPostCount > 0) {
-                // 最初のチャンクを読み込む
                 await loadNextChunk();
             } else {
                 document.getElementById('posts-container').innerHTML = '<p class="no-posts">まだ投稿がありません。</p>';
@@ -355,10 +232,8 @@
           hideLoadingOverlay();
         }
       }
-
       async function loadNextChunk() {
         if (!currentViewingThreadId) return;
-        
         const nextChunkIndex = lastLoadedChunk + 1;
         const buttonId = `load-more-btn-${nextChunkIndex}`;
         const existingButton = document.getElementById(buttonId);
@@ -366,7 +241,6 @@
             existingButton.textContent = '読み込み中...';
             existingButton.disabled = true;
         }
-
         try {
             const response = await fetch(`/api/threads/${currentViewingThreadId}/posts/${nextChunkIndex}`);
             if (!response.ok) {
@@ -379,15 +253,11 @@
                 return;
             }
             const posts = await response.json();
-            
             if (posts.length > 0) {
                 renderPosts(posts);
                 lastLoadedChunk = nextChunkIndex;
             }
-
-            // 「もっと読む」ボタンの表示制御
             if (existingButton) existingButton.remove();
-            
             const totalLoadedPosts = document.querySelectorAll('#posts-container .post').length;
             if (currentViewingThreadPostCount > totalLoadedPosts) {
                  loadMoreContainer.innerHTML = `<button id="load-more-btn-${lastLoadedChunk + 1}">もっと読む</button>`;
@@ -402,7 +272,6 @@
             }
         }
       }
-
       async function createNewThread(event) {
         event.preventDefault();
         const form = event.target;
@@ -425,7 +294,6 @@
         } catch(error) { console.error(error); alert(error.message); } 
         finally { button.disabled = false; hideLoadingOverlay(); }
       }
-
       async function createNewPost(event) {
         event.preventDefault();
         const form = event.target;
@@ -442,20 +310,17 @@
           });
           if (!response.ok) await handleApiError(response);
           const { post: newPost } = await response.json();
-          
           appendPost(newPost);
-          currentViewingThreadPostCount++; // 総投稿数をインクリメント
-
+          currentViewingThreadPostCount++;
           document.getElementById('new-post-body').value = '';
           window.scrollTo(0, document.body.scrollHeight);
         } catch(error) { console.error(error); alert(error.message); } 
         finally { button.disabled = false; }
       }
-
       function showThreadList() {
         threadContentView.style.display = 'none';
         threadListView.style.display = 'block';
-        currentViewingThreadId = null; // 状態をリセット
+        currentViewingThreadId = null;
         fetchAndDisplayThreads();
       }
 
