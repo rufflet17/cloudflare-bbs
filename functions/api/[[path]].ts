@@ -31,33 +31,43 @@ const THREAD_LIST_CACHE_TTL = 30;       // スレッド一覧のキャッシュ�
 // 2. メインハンドラ (リクエストのルーティング)
 // -----------------------------------------------------------------------------
 export const onRequest: PagesFunction<Env> = async (context) => {
-  const { request, env } = context;
+  const { request } = context;
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method;
 
   try {
-    if (method === 'GET' && path === '/api/threads') {
-      return await getThreads(context);
-    }
-    if (method === 'POST' && path === '/api/threads') {
-      return await createThread(context);
+    // GETリクエストのルーティング
+    if (method === 'GET') {
+      if (path === '/api/threads') {
+        return await getThreads(context);
+      }
+      const infoMatch = path.match(/^\/api\/threads\/(\d+)\/info$/);
+      if (infoMatch) {
+        const threadId = parseInt(infoMatch[1], 10);
+        return await getThreadInfo(context, threadId);
+      }
+      const postsMatch = path.match(/^\/api\/threads\/(\d+)\/posts$/);
+      if (postsMatch) {
+        const threadId = parseInt(postsMatch[1], 10);
+        return await getPostsForThread(context, threadId);
+      }
     }
 
-    const infoMatch = path.match(/^\/api\/threads\/(\d+)\/info$/);
-    if (method === 'GET' && infoMatch) {
-      const threadId = parseInt(infoMatch[1], 10);
-      return await getThreadInfo(context, threadId);
-    }
-    
-    const postsMatch = path.match(/^\/api\/threads\/(\d+)\/posts$/);
-    if (method === 'GET' && postsMatch) {
-      const threadId = parseInt(postsMatch[1], 10);
-      return await getPostsForThread(context, threadId);
-    }
-    if (method === 'POST' && postsMatch) {
-      const threadId = parseInt(postsMatch[1], 10);
-      return await createPost(context, threadId);
+    // POSTリクエストのルーティング
+    if (method === 'POST') {
+      // ▼▼▼ エラー修正点 ▼▼▼
+      // POSTリクエストのボディはここで一度だけ読み込む
+      const body = await request.json<any>();
+
+      if (path === '/api/threads') {
+        return await createThread(context, body);
+      }
+      const postsMatch = path.match(/^\/api\/threads\/(\d+)\/posts$/);
+      if (postsMatch) {
+        const threadId = parseInt(postsMatch[1], 10);
+        return await createPost(context, threadId, body);
+      }
     }
     
     return new Response(JSON.stringify({ error: 'API endpoint not found' }), { 
@@ -65,6 +75,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     });
 
   } catch (e: any) {
+    // ボディ読み取りエラーなどもここでキャッチされる
+    if (e instanceof TypeError && e.message.includes('disturbed')) {
+        console.error("API Error: Attempted to read request body twice.", e);
+        return new Response(JSON.stringify({ error: "Internal server error: Could not process request body."}), { status: 500 });
+    }
     console.error("API Error:", e);
     const errorResponse = { error: e.message || "An internal server error occurred." };
     return new Response(JSON.stringify(errorResponse), {
@@ -109,10 +124,11 @@ async function getThreadInfo(context: EventContext<Env, any, any>, threadId: num
     return new Response(JSON.stringify(threadInfo), { headers: { "Content-Type": "application/json" } });
 }
 
-async function createThread(context: EventContext<Env, any, any>): Promise<Response> {
+// ▼▼▼ エラー修正点 ▼▼▼
+async function createThread(context: EventContext<Env, any, any>, body: { title: string; author: string; body: string }): Promise<Response> {
   const { request, env, waitUntil } = context;
-  const { title, author, body } = await request.json<{ title: string; author: string; body: string }>();
-  if (!title || !body) return new Response(JSON.stringify({ error: "Title and body are required." }), { status: 400, headers: { "Content-Type": "application/json" } });
+  const { title, author, body: postBody } = body; // `body`が変数名として被るので`postBody`に変更
+  if (!title || !postBody) return new Response(JSON.stringify({ error: "Title and body are required." }), { status: 400 });
 
   const threadResult = await env.MY_D1_DATABASE2.prepare("INSERT INTO threads (title) VALUES (?) RETURNING id").bind(title).first<{ id: number }>();
   const newThreadId = threadResult?.id;
@@ -120,15 +136,15 @@ async function createThread(context: EventContext<Env, any, any>): Promise<Respo
   
   await env.MY_D1_DATABASE2.batch([
     env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body) VALUES (?, 1, ?, ?)")
-      .bind(newThreadId, author || '名無しさん', body),
+      .bind(newThreadId, author || '名無しさん', postBody),
     env.MY_D1_DATABASE2.prepare("INSERT INTO threads_meta (id, title, post_count) VALUES (?, ?, 1)")
       .bind(newThreadId, title)
   ]);
   
   const cache = caches.default;
-  const threadsCacheUrl = new URL(request.url);
-  threadsCacheUrl.pathname = '/api/threads';
-  waitUntil(cache.delete(new Request(threadsCacheUrl.toString(), request)));
+  const url = new URL(request.url);
+  const threadsCacheUrl = `${url.protocol}//${url.host}/api/threads`;
+  waitUntil(cache.delete(new Request(threadsCacheUrl, request)));
 
   return new Response(JSON.stringify({ id: newThreadId }), { status: 201, headers: { "Content-Type": "application/json" } });
 }
@@ -161,10 +177,11 @@ async function getPostsForThread(context: EventContext<Env, any, any>, threadId:
     }
   } else {
     // D1から取得
-    const offset = chunkIndex * CHUNK_SIZE;
+    // D1上のオフセットを計算
+    const d1Offset = (chunkIndex - threadInfo.archived_chunk_count) * CHUNK_SIZE;
     const { results } = await env.MY_D1_DATABASE2.prepare(
         "SELECT * FROM posts WHERE thread_id = ? ORDER BY post_number ASC LIMIT ? OFFSET ?"
-    ).bind(threadId, CHUNK_SIZE, offset).all<Post>();
+    ).bind(threadId, CHUNK_SIZE, d1Offset).all<Post>();
     posts = results;
   }
 
@@ -178,12 +195,12 @@ async function getPostsForThread(context: EventContext<Env, any, any>, threadId:
   return response;
 }
 
-async function createPost(context: EventContext<Env, any, any>, threadId: number): Promise<Response> {
+// ▼▼▼ エラー修正点 ▼▼▼
+async function createPost(context: EventContext<Env, any, any>, threadId: number, body: { author: string; body: string }): Promise<Response> {
   const { request, env, waitUntil } = context;
-  const { author, body } = await request.json<{ author: string; body: string }>();
-  if (!body) return new Response(JSON.stringify({ error: "Body is required." }), { status: 400 });
+  const { author, body: postBody } = body;
+  if (!postBody) return new Response(JSON.stringify({ error: "Body is required." }), { status: 400 });
 
-  // 1. レス数を増やし、新しいレス番号を取得
   const threadInfo = await env.MY_D1_DATABASE2.prepare(
     "UPDATE threads_meta SET post_count = post_count + 1, last_updated = CURRENT_TIMESTAMP WHERE id = ? RETURNING post_count, archived_chunk_count"
   ).bind(threadId).first<{ post_count: number, archived_chunk_count: number }>();
@@ -191,31 +208,26 @@ async function createPost(context: EventContext<Env, any, any>, threadId: number
   
   const newPostCount = threadInfo.post_count;
 
-  // 2. 新しい投稿をD1に挿入
   await env.MY_D1_DATABASE2.prepare(
     "INSERT INTO posts (thread_id, post_number, author, body) VALUES (?, ?, ?, ?)"
-  ).bind(threadId, newPostCount, author || '名無しさん', body).run();
+  ).bind(threadId, newPostCount, author || '名無しさん', postBody).run();
 
-  // 3. アーカイブ処理の判定と実行
   const d1PostCount = newPostCount - (threadInfo.archived_chunk_count * CHUNK_SIZE);
   if (d1PostCount > CHUNK_SIZE) {
     waitUntil(archiveChunk(context, threadId, threadInfo.archived_chunk_count));
   }
 
-  // 4. 最新チャンクのキャッシュを手動で生成
   const latestChunkIndex = Math.floor((newPostCount - 1) / CHUNK_SIZE);
   waitUntil(updateLatestChunkCache(context, threadId, latestChunkIndex));
   
-  // 5. スレッド一覧のキャッシュを削除
   const url = new URL(request.url);
   const threadsCacheUrl = `${url.protocol}//${url.host}/api/threads`;
   waitUntil(caches.default.delete(new Request(threadsCacheUrl)));
   
-  // 6. フロントエンドへ最新情報を返す
-  const offset = latestChunkIndex * CHUNK_SIZE;
+  const d1Offset = (latestChunkIndex - threadInfo.archived_chunk_count) * CHUNK_SIZE;
   const { results: latestChunkPosts } = await env.MY_D1_DATABASE2.prepare(
     "SELECT * FROM posts WHERE thread_id = ? ORDER BY post_number ASC LIMIT ? OFFSET ?"
-  ).bind(threadId, CHUNK_SIZE, offset).all<Post>();
+  ).bind(threadId, CHUNK_SIZE, d1Offset).all<Post>();
 
   return new Response(JSON.stringify({ new_post_count: newPostCount, latest_chunk_posts: latestChunkPosts }), { 
       status: 201, headers: { "Content-Type": "application/json" } 
@@ -226,10 +238,17 @@ async function archiveChunk(context: EventContext<Env, any, any>, threadId: numb
     const { env } = context;
     console.log(`Archiving chunk ${chunkToArchive} for thread ${threadId}`);
     try {
-        const offset = chunkToArchive * CHUNK_SIZE;
+        const threadInfo = await env.MY_D1_DATABASE2.prepare(
+            "SELECT archived_chunk_count FROM threads_meta WHERE id = ?"
+        ).bind(threadId).first<{ archived_chunk_count: number }>();
+        if (!threadInfo) return;
+        
+        // アーカイブするチャンクのD1内でのオフセットを計算
+        const d1Offset = (chunkToArchive - threadInfo.archived_chunk_count) * CHUNK_SIZE;
+
         const { results, success } = await env.MY_D1_DATABASE2.prepare(
             "SELECT * FROM posts WHERE thread_id = ? ORDER BY post_number ASC LIMIT ? OFFSET ?"
-        ).bind(threadId, CHUNK_SIZE, offset).all<Post>();
+        ).bind(threadId, CHUNK_SIZE, d1Offset).all<Post>();
 
         if (!success || !results || results.length === 0) {
             console.error(`No posts found to archive for chunk ${chunkToArchive}`);
@@ -261,10 +280,17 @@ async function archiveChunk(context: EventContext<Env, any, any>, threadId: numb
 
 async function updateLatestChunkCache(context: EventContext<Env, any, any>, threadId: number, latestChunkIndex: number) {
     const { env, request } = context;
-    const offset = latestChunkIndex * CHUNK_SIZE;
+    
+    const threadInfo = await env.MY_D1_DATABASE2.prepare(
+        "SELECT archived_chunk_count FROM threads_meta WHERE id = ?"
+    ).bind(threadId).first<{ archived_chunk_count: number }>();
+    if (!threadInfo) return;
+
+    const d1Offset = (latestChunkIndex - threadInfo.archived_chunk_count) * CHUNK_SIZE;
+
     const { results } = await env.MY_D1_DATABASE2.prepare(
         "SELECT * FROM posts WHERE thread_id = ? ORDER BY post_number ASC LIMIT ? OFFSET ?"
-    ).bind(threadId, CHUNK_SIZE, offset).all<Post>();
+    ).bind(threadId, CHUNK_SIZE, d1Offset).all<Post>();
     
     if (!results) return;
 
