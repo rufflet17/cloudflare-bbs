@@ -157,10 +157,6 @@
     .back-button, #pagination-container button { margin-bottom: 15px; }
     #pagination-container { text-align: center; }
 
-    /* --- ローディングスピナーのスタイル（流用） --- */
-    .loading-spinner { border: 4px solid #f3f3f3; border-top: 4px solid var(--link-color); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
-    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
     .view { display: none; } /* Helper class for views */
   </style>
 </head>
@@ -175,14 +171,6 @@
         <button data-theme="classic">クラシック</button>
         <button data-theme="modern">モダン</button>
     </div>
-
-    <!-- ▼▼▼ 変更点 ▼▼▼ -->
-    <!-- メインコンテンツ用のローダー -->
-    <div id="main-loader" style="display: none; text-align: center; padding: 40px 0;">
-      <div class="loading-spinner" style="margin: 0 auto 20px;"></div>
-      <p>読み込み中...</p>
-    </div>
-    <!-- ▲▲▲ 変更点 ▲▲▲ -->
 
     <!-- ホーム（ジャンル一覧）ビュー -->
     <div id="home-view" class="view">
@@ -238,7 +226,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const threadListContainer = document.getElementById('thread-list');
     const postsContainer = document.getElementById('posts-container');
     const paginationContainer = document.getElementById('pagination-container');
-    const mainLoader = document.getElementById('main-loader'); // 変更：ローダー要素を取得
 
     // --- Theme Switcher (No changes) ---
     const themeSwitcher = document.querySelector('.theme-switcher');
@@ -253,8 +240,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Helper Functions ---
     const escapeHTML = (str) => str.replace(/[&<>"']/g, (match) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[match]));
-    // 変更：オーバーレイではなくメインローダーを制御する関数
-    const showMainLoader = (show) => { mainLoader.style.display = show ? 'block' : 'none'; };
     async function handleApiError(response) {
         try {
             const errorData = await response.json();
@@ -276,36 +261,43 @@ document.addEventListener('DOMContentLoaded', () => {
         return { view: 'home' };
     };
 
+    // ▼▼▼ 変更点 ▼▼▼
     const router = async () => {
         const route = parsePath();
         currentState = { ...route };
 
-        Object.values(views).forEach(view => view.style.display = 'none');
-        showMainLoader(true); // 変更：オーバーレイの代わりにメインローダーを表示
-
         try {
+            let nextView;
+            // 1. 裏側で次のビューのコンテンツを準備する
             switch (route.view) {
                 case 'threadContent':
-                    await showThreadContentView(route.threadId);
+                    await prepareThreadContentView(route.threadId);
+                    nextView = views.threadContent;
                     break;
                 case 'threadList':
-                    await showThreadListView(route.genre);
+                    await prepareThreadListView(route.genre);
+                    nextView = views.threadList;
                     break;
                 case 'home':
                 default:
-                    await showHomeView();
+                    await prepareHomeView();
+                    nextView = views.home;
                     break;
+            }
+            
+            // 2. 準備が完了したら、表示を一度に切り替える
+            Object.values(views).forEach(view => view.style.display = 'none');
+            if (nextView) {
+                nextView.style.display = 'block';
             }
         } catch (error) {
             console.error(error);
             alert(error.message);
-        } finally {
-            showMainLoader(false); // 変更：メインローダーを非表示
         }
     };
 
-    // --- View Rendering Functions ---
-    const showHomeView = async () => {
+    // --- View Preparation Functions ---
+    const prepareHomeView = async () => {
         const res = await fetch('/api/genres');
         if (!res.ok) await handleApiError(res);
         const genres = await res.json();
@@ -323,10 +315,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             genreListContainer.innerHTML = '<p>ジャンルはまだありません。</p>';
         }
-        views.home.style.display = 'block';
     };
 
-    const showThreadListView = async (genre) => {
+    const prepareThreadListView = async (genre) => {
         const res = await fetch(`/api/threads?genre=${genre}`);
         if (!res.ok) await handleApiError(res);
         const threads = await res.json();
@@ -352,10 +343,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             threadListContainer.innerHTML = '<p>スレッドはまだありません。</p>';
         }
-        views.threadList.style.display = 'block';
     };
 
-    const showThreadContentView = async (threadId) => {
+    const prepareThreadContentView = async (threadId) => {
         const infoRes = await fetch(`/api/threads/${threadId}/info`);
         if (!infoRes.ok) await handleApiError(infoRes);
         const threadInfo = await infoRes.json();
@@ -371,8 +361,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const posts = await postsRes.json();
         renderPosts(posts);
         renderPagination(threadInfo);
-        views.threadContent.style.display = 'block';
     };
+    // ▲▲▲ 変更点 ▲▲▲
 
     // --- Post/Pagination Rendering ---
     const renderPosts = (posts, clear = true) => {
@@ -397,31 +387,29 @@ document.addEventListener('DOMContentLoaded', () => {
         if (totalChunks > 1) {
             const button = document.createElement('button');
             button.textContent = `すべてのレスを表示 (1-${threadInfo.post_count})`;
-            button.onclick = () => fetchAllPosts(threadInfo.id, totalChunks);
+            button.onclick = (e) => fetchAllPosts(e.target, threadInfo.id, totalChunks, button.textContent);
             paginationContainer.appendChild(button);
         }
     };
-
+    
     // ▼▼▼ 変更点 ▼▼▼
-    const fetchAllPosts = async (threadId, totalChunks) => {
-        // オーバーレイの代わりに、postsContainer内にローディング表示を出す
-        paginationContainer.innerHTML = '';
-        postsContainer.innerHTML = `
-            <div style="text-align: center; padding: 40px 0;">
-                <div class="loading-spinner" style="margin: 0 auto 20px;"></div>
-                <p>すべてのレスを読み込んでいます...</p>
-            </div>`;
+    const fetchAllPosts = async (button, threadId, totalChunks, originalText) => {
+        button.disabled = true;
+        button.textContent = '読み込んでいます...';
             
         try {
             const promises = Array.from({ length: totalChunks }, (_, i) => 
                 fetch(`/api/threads/${threadId}/posts?chunk=${i}`).then(res => res.json())
             );
             const chunkResults = await Promise.all(promises);
-            renderPosts(chunkResults.flat(), true); // trueでコンテナをクリアしてから描画
+            renderPosts(chunkResults.flat(), true);
+            paginationContainer.innerHTML = ''; // 成功したらボタン自体を消す
         } catch (error) {
-            console.error(error); alert('全レスの読み込みに失敗しました。');
-            // エラー時は元の表示に戻す
-            await showThreadContentView(threadId);
+            console.error(error); 
+            alert('全レスの読み込みに失敗しました。');
+            // 失敗したらボタンを元の状態に戻す
+            button.disabled = false;
+            button.textContent = originalText;
         }
     };
     // ▲▲▲ 変更点 ▲▲▲
@@ -451,7 +439,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             if (!res.ok) await handleApiError(res);
             form.reset();
-            await showThreadListView(genre);
+            // 変更：routerを呼び出す代わりに、直接View準備関数を呼んで表示を更新
+            await prepareThreadListView(genre); 
         } catch(error) {
             console.error(error); alert(error.message);
         } finally {
