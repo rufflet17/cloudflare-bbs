@@ -247,6 +247,16 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) { throw new Error('サーバーとの通信に失敗'); }
     }
 
+    // ▼▼▼ 変更点：UTC日付文字列を正しく解釈するヘルパー関数 ▼▼▼
+    const parseUTCDate = (dateString) => {
+        if (!dateString) return null;
+        // "YYYY-MM-DD HH:MM:SS" のような形式を "YYYY-MM-DDTHH:MM:SSZ" に変換
+        // これにより、new Date() はこの文字列をUTCとして正しく解釈する
+        const isoString = dateString.replace(' ', 'T') + 'Z';
+        return new Date(isoString);
+    };
+    // ▲▲▲ 変更点 ▲▲▲
+
     // --- Navigation & Router ---
     const navigate = (path) => {
         history.pushState(null, '', path);
@@ -261,14 +271,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return { view: 'home' };
     };
 
-    // ▼▼▼ 変更点 ▼▼▼
     const router = async () => {
         const route = parsePath();
         currentState = { ...route };
 
         try {
             let nextView;
-            // 1. 裏側で次のビューのコンテンツを準備する
             switch (route.view) {
                 case 'threadContent':
                     await prepareThreadContentView(route.threadId);
@@ -285,7 +293,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     break;
             }
             
-            // 2. 準備が完了したら、表示を一度に切り替える
             Object.values(views).forEach(view => view.style.display = 'none');
             if (nextView) {
                 nextView.style.display = 'block';
@@ -331,12 +338,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 const a = document.createElement('a');
                 a.href = `/${genre}/${thread.id}`;
                 a.className = 'thread-item';
+                // ▼▼▼ 変更点：parseUTCDateを使い、表示形式も調整 ▼▼▼
+                const lastUpdatedDate = parseUTCDate(thread.last_updated);
+                const formattedDate = lastUpdatedDate.toLocaleString('ja-JP', {
+                    year: '2-digit', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit'
+                });
                 a.innerHTML = `
-                    <div class="thread-details">${thread.id}: <strong>${escapeHTML(thread.title)}</strong></div>
+                    <div class="thread-details"><strong>${escapeHTML(thread.title)}</strong></div>
                     <div class="thread-meta">
                         レス: ${thread.post_count}<br>
-                        更新: ${new Date(thread.last_updated).toLocaleString('ja-JP', { year:'2-digit', month:'2-digit', day:'2-digit', hour: '2-digit', minute: '2-digit'})}
+                        更新: ${formattedDate}
                     </div>`;
+                // ▲▲▲ 変更点 ▲▲▲
                 a.onclick = (e) => { e.preventDefault(); navigate(`/${genre}/${thread.id}`); };
                 threadListContainer.appendChild(a);
             });
@@ -362,7 +376,6 @@ document.addEventListener('DOMContentLoaded', () => {
         renderPosts(posts);
         renderPagination(threadInfo);
     };
-    // ▲▲▲ 変更点 ▲▲▲
 
     // --- Post/Pagination Rendering ---
     const renderPosts = (posts, clear = true) => {
@@ -374,9 +387,17 @@ document.addEventListener('DOMContentLoaded', () => {
         posts.sort((a, b) => a.post_number - b.post_number).forEach(post => {
             const div = document.createElement('div');
             div.className = 'post';
+            // ▼▼▼ 変更点：parseUTCDateを使い、表示形式とタイムゾーンも指定 ▼▼▼
+            const createdAtDate = parseUTCDate(post.created_at);
+            const formattedDate = createdAtDate.toLocaleString('ja-JP', {
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit',
+                timeZoneName: 'short'
+            });
             div.innerHTML = `
-                <div class="post-header"><span>${post.post_number}: ${escapeHTML(post.author || '名無しさん')}</span><span class="post-date">${new Date(post.created_at).toLocaleString('ja-JP')}</span></div>
+                <div class="post-header"><span>${post.post_number}: ${escapeHTML(post.author || '名無しさん')}</span><span class="post-date">${formattedDate}</span></div>
                 <div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>`;
+            // ▲▲▲ 変更点 ▲▲▲
             postsContainer.appendChild(div);
         });
     };
@@ -392,7 +413,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     
-    // ▼▼▼ 変更点 ▼▼▼
     const fetchAllPosts = async (button, threadId, totalChunks, originalText) => {
         button.disabled = true;
         button.textContent = '読み込んでいます...';
@@ -402,17 +422,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 fetch(`/api/threads/${threadId}/posts?chunk=${i}`).then(res => res.json())
             );
             const chunkResults = await Promise.all(promises);
-            renderPosts(chunkResults.flat(), true);
-            paginationContainer.innerHTML = ''; // 成功したらボタン自体を消す
+            renderPosts(chunkResults.flat(), true); 
+            paginationContainer.innerHTML = ''; 
         } catch (error) {
             console.error(error); 
             alert('全レスの読み込みに失敗しました。');
-            // 失敗したらボタンを元の状態に戻す
             button.disabled = false;
             button.textContent = originalText;
         }
     };
-    // ▲▲▲ 変更点 ▲▲▲
     
     // --- Event Handlers ---
     document.querySelector('header a').onclick = (e) => { e.preventDefault(); navigate('/'); };
@@ -439,7 +457,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             if (!res.ok) await handleApiError(res);
             form.reset();
-            // 変更：routerを呼び出す代わりに、直接View準備関数を呼んで表示を更新
             await prepareThreadListView(genre); 
         } catch(error) {
             console.error(error); alert(error.message);
