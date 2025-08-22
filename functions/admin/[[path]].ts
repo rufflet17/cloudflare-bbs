@@ -1,28 +1,20 @@
-// functions/admin/[[path]].ts
+// cloudflare-bbs/functions/admin/[[path]].ts
 
 interface Env {
   MY_D1_DATABASE2: D1Database;
   MY_R2_BUCKET2: R2Bucket;
+  ADMIN_API_KEY: string; // 環境変数として設定するAPIキー
 }
 
-// CORSヘッダー: localhostからのアクセスを許可する
+// CORSヘッダー: localhostからのアクセスを許可
 const corsHeaders = {
   'Access-Control-Allow-Origin': 'http://localhost:3000',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-control-Allow-Headers': 'Content-Type, X-Admin-API-Key',
 };
 
-// preflightリクエスト(OPTIONS)への対応
 const handleOptions = (request: Request) => {
-    if (
-        request.headers.get('Origin') !== null &&
-        request.headers.get('Access-Control-Request-Method') !== null &&
-        request.headers.get('Access-Control-Request-Headers') !== null
-    ) {
-        return new Response(null, { headers: corsHeaders });
-    } else {
-        return new Response(null, { headers: { Allow: 'GET, POST, OPTIONS' } });
-    }
+    return new Response(null, { headers: corsHeaders });
 }
 
 export const onRequest: PagesFunction<Env> = async (context) => {
@@ -31,15 +23,19 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     const path = url.pathname;
     const method = request.method;
 
-    // OPTIONSメソッド(preflight)リクエストの処理
     if (method === 'OPTIONS') {
         return handleOptions(request);
     }
     
+    // === セキュリティチェック ===
+    const apiKey = request.headers.get('X-Admin-API-Key');
+    if (!apiKey || apiKey !== env.ADMIN_API_KEY) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+    }
+
     try {
         if (method === 'GET') {
-            const threadsMatch = path.match(/^\/admin\/threads$/);
-            if (threadsMatch) {
+            if (path === '/admin/threads') {
                 const { results } = await env.MY_D1_DATABASE2.prepare(
                     "SELECT id, title, genre FROM threads_meta ORDER BY id DESC"
                 ).all();
@@ -58,25 +54,19 @@ export const onRequest: PagesFunction<Env> = async (context) => {
                 }
 
                 let allPosts = [];
-                // R2から取得
                 if (threadInfo.archived_chunk_count > 0) {
                     for (let i = 0; i < threadInfo.archived_chunk_count; i++) {
                         const r2Key = `thread/${threadId}/${i}.json`;
                         const r2Object = await env.MY_R2_BUCKET2.get(r2Key);
-                        if (r2Object) {
-                            const chunkPosts = await r2Object.json<any[]>();
-                            allPosts.push(...chunkPosts);
-                        }
+                        if (r2Object) allPosts.push(...await r2Object.json<any[]>());
                     }
                 }
-                // D1から取得
-                const d1PostCount = threadInfo.post_count - (threadInfo.archived_chunk_count * 50);
-                 if (d1PostCount > 0) {
+                if (threadInfo.post_count > allPosts.length) {
                     const { results } = await env.MY_D1_DATABASE2.prepare(
                         "SELECT * FROM posts WHERE thread_id = ? ORDER BY post_number ASC"
                     ).bind(threadId).all();
                     if (results) allPosts.push(...results);
-                 }
+                }
                 allPosts.sort((a, b) => a.post_number - b.post_number);
                 return new Response(JSON.stringify(allPosts), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
             }
@@ -100,7 +90,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return new Response(JSON.stringify({ error: 'Admin API endpoint not found' }), { status: 404, headers: corsHeaders });
 
     } catch (e: any) {
-        console.error("Admin API Error:", e);
         return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
     }
 }
