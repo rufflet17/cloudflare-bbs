@@ -10,6 +10,7 @@ interface Env {
 interface Thread {
   id: number;
   title: string;
+  genre: string;
   post_count: number;
   last_updated: string;
   archived_chunk_count: number;
@@ -39,6 +40,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   try {
     // GETリクエストのルーティング
     if (method === 'GET') {
+      if (path === '/api/genres') {
+        return await getGenres(context);
+      }
       if (path === '/api/threads') {
         return await getThreads(context);
       }
@@ -89,17 +93,38 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 // 3. APIロジック (個別の関数)
 // -----------------------------------------------------------------------------
 
+async function getGenres(context: EventContext<Env, any, any>): Promise<Response> {
+    const { env } = context;
+    const { results } = await env.MY_D1_DATABASE2.prepare(
+        "SELECT DISTINCT genre FROM threads_meta WHERE genre IS NOT NULL"
+    ).all<{ genre: string }>();
+    return new Response(JSON.stringify(results ?? []), {
+        headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${THREAD_LIST_CACHE_TTL}` }
+    });
+}
+
 async function getThreads(context: EventContext<Env, any, any>): Promise<Response> {
   const { request, env, waitUntil } = context;
+  const url = new URL(request.url);
+  const genre = url.searchParams.get('genre');
+
   const cache = caches.default;
   const cacheKey = new Request(request.url, request);
 
   const cachedResponse = await cache.match(cacheKey);
   if (cachedResponse) return cachedResponse;
 
-  const { results } = await env.MY_D1_DATABASE2.prepare(
-    "SELECT id, title, post_count, last_updated FROM threads_meta ORDER BY last_updated DESC LIMIT 50"
-  ).all<Thread>();
+  let query;
+  if (genre) {
+    query = env.MY_D1_DATABASE2.prepare(
+        "SELECT id, title, post_count, last_updated FROM threads_meta WHERE genre = ? ORDER BY last_updated DESC LIMIT 50"
+    ).bind(genre);
+  } else {
+    query = env.MY_D1_DATABASE2.prepare(
+        "SELECT id, title, post_count, last_updated FROM threads_meta ORDER BY last_updated DESC LIMIT 50"
+    );
+  }
+  const { results } = await query.all<Thread>();
   
   const response = new Response(JSON.stringify(results ?? []), {
     headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${THREAD_LIST_CACHE_TTL}` }
@@ -111,8 +136,9 @@ async function getThreads(context: EventContext<Env, any, any>): Promise<Respons
 
 async function getThreadInfo(context: EventContext<Env, any, any>, threadId: number): Promise<Response> {
     const { env } = context;
+    // `genre`も取得するように変更
     const threadInfo = await env.MY_D1_DATABASE2.prepare(
-        "SELECT id, title, post_count FROM threads_meta WHERE id = ?"
+        "SELECT id, title, genre, post_count FROM threads_meta WHERE id = ?"
     ).bind(threadId).first<Thread>();
 
     if (!threadInfo) {
@@ -121,11 +147,12 @@ async function getThreadInfo(context: EventContext<Env, any, any>, threadId: num
     return new Response(JSON.stringify(threadInfo), { headers: { "Content-Type": "application/json" } });
 }
 
-async function createThread(context: EventContext<Env, any, any>, body: { title: string; author: string; body: string }): Promise<Response> {
+async function createThread(context: EventContext<Env, any, any>, body: { genre: string; title: string; author: string; body: string }): Promise<Response> {
   const { request, env, waitUntil } = context;
-  const { title, author, body: postBody } = body;
-  if (!title || !postBody) return new Response(JSON.stringify({ error: "Title and body are required." }), { status: 400 });
+  const { genre, title, author, body: postBody } = body;
+  if (!genre || !title || !postBody) return new Response(JSON.stringify({ error: "Genre, title and body are required." }), { status: 400 });
 
+  // `threads`テーブルは廃止も検討できるが、互換性のため残す
   const threadResult = await env.MY_D1_DATABASE2.prepare("INSERT INTO threads (title) VALUES (?) RETURNING id").bind(title).first<{ id: number }>();
   const newThreadId = threadResult?.id;
   if (!newThreadId) throw new Error("Failed to create a new thread.");
@@ -133,17 +160,19 @@ async function createThread(context: EventContext<Env, any, any>, body: { title:
   await env.MY_D1_DATABASE2.batch([
     env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body) VALUES (?, 1, ?, ?)")
       .bind(newThreadId, author || '名無しさん', postBody),
-    env.MY_D1_DATABASE2.prepare("INSERT INTO threads_meta (id, title, post_count) VALUES (?, ?, 1)")
-      .bind(newThreadId, title)
+    env.MY_D1_DATABASE2.prepare("INSERT INTO threads_meta (id, title, genre, post_count) VALUES (?, ?, ?, 1)")
+      .bind(newThreadId, title, genre)
   ]);
   
   const cache = caches.default;
   const url = new URL(request.url);
-  const threadsCacheUrl = `${url.protocol}//${url.host}/api/threads`;
-  
-  // ▼▼▼ ここが修正された行です ▼▼▼
-  // 第2引数の`request`を削除し、URLのみを渡すように変更
-  waitUntil(cache.delete(new Request(threadsCacheUrl)));
+  // ジャンル別スレッド一覧と総合スレッド一覧の両方のキャッシュを削除
+  const genreThreadsCacheUrl = `${url.protocol}//${url.host}/api/threads?genre=${genre}`;
+  const allThreadsCacheUrl = `${url.protocol}//${url.host}/api/threads`;
+  waitUntil(Promise.all([
+      cache.delete(new Request(genreThreadsCacheUrl)),
+      cache.delete(new Request(allThreadsCacheUrl))
+  ]));
 
   return new Response(JSON.stringify({ id: newThreadId }), { status: 201, headers: { "Content-Type": "application/json" } });
 }
@@ -197,8 +226,8 @@ async function createPost(context: EventContext<Env, any, any>, threadId: number
   if (!postBody) return new Response(JSON.stringify({ error: "Body is required." }), { status: 400 });
 
   const threadInfo = await env.MY_D1_DATABASE2.prepare(
-    "UPDATE threads_meta SET post_count = post_count + 1, last_updated = CURRENT_TIMESTAMP WHERE id = ? RETURNING post_count, archived_chunk_count"
-  ).bind(threadId).first<{ post_count: number, archived_chunk_count: number }>();
+    "UPDATE threads_meta SET post_count = post_count + 1, last_updated = CURRENT_TIMESTAMP WHERE id = ? RETURNING post_count, archived_chunk_count, genre"
+  ).bind(threadId).first<{ post_count: number, archived_chunk_count: number, genre: string }>();
   if (!threadInfo) throw new Error("Failed to update thread counters.");
   
   const newPostCount = threadInfo.post_count;
@@ -216,8 +245,12 @@ async function createPost(context: EventContext<Env, any, any>, threadId: number
   waitUntil(updateLatestChunkCache(context, threadId, latestChunkIndex));
   
   const url = new URL(request.url);
-  const threadsCacheUrl = `${url.protocol}//${url.host}/api/threads`;
-  waitUntil(caches.default.delete(new Request(threadsCacheUrl)));
+  const genreThreadsCacheUrl = `${url.protocol}//${url.host}/api/threads?genre=${threadInfo.genre}`;
+  const allThreadsCacheUrl = `${url.protocol}//${url.host}/api/threads`;
+   waitUntil(Promise.all([
+      caches.default.delete(new Request(genreThreadsCacheUrl)),
+      caches.default.delete(new Request(allThreadsCacheUrl))
+  ]));
   
   const d1Offset = (latestChunkIndex - threadInfo.archived_chunk_count) * CHUNK_SIZE;
   const { results: latestChunkPosts } = await env.MY_D1_DATABASE2.prepare(
@@ -229,8 +262,9 @@ async function createPost(context: EventContext<Env, any, any>, threadId: number
   });
 }
 
+// `archiveChunk` と `updateLatestChunkCache` は変更がないため、前のコードをそのまま使用
 async function archiveChunk(context: EventContext<Env, any, any>, threadId: number, chunkToArchive: number) {
-    const { env, request } = context; // request を追加
+    const { env, request } = context;
     console.log(`Archiving chunk ${chunkToArchive} for thread ${threadId}`);
     try {
         const threadInfo = await env.MY_D1_DATABASE2.prepare(
