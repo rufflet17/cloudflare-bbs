@@ -152,7 +152,8 @@
         margin-left: 0;
     }
     
-    #back-to-list-btn { margin-bottom: 15px; }
+    #back-to-list-btn, #pagination-container button { margin-bottom: 15px; }
+    #pagination-container { text-align: center; }
 
     #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(255, 255, 255, 0.85); z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; color: #333; font-size: 1.1em; text-align: center; }
     .loading-spinner { border: 4px solid #f3f3f3; border-top: 4px solid var(--link-color); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 20px; }
@@ -193,6 +194,7 @@
       <button id="back-to-list-btn">&laquo; スレッド一覧に戻る</button>
       <h2 id="thread-title"></h2>
       <div id="posts-container"></div>
+      <div id="pagination-container"></div>
       <hr>
       <h3>レスを書き込む</h3>
       <form id="new-post-form">
@@ -204,66 +206,75 @@
     </div>
   </main>
 
-  <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      // --- テーマ切り替えのロジック ---
-      const themeSwitcher = document.querySelector('.theme-switcher');
-      const themeButtons = themeSwitcher.querySelectorAll('button');
-      
-      const applyTheme = (theme) => {
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const CHUNK_SIZE = 50;
+    let currentThreadInfo = {};
+
+    // --- テーマ切り替えのロジック (変更なし) ---
+    const themeSwitcher = document.querySelector('.theme-switcher');
+    const themeButtons = themeSwitcher.querySelectorAll('button');
+    
+    const applyTheme = (theme) => {
         document.body.setAttribute('data-theme', theme);
         themeButtons.forEach(btn => {
             btn.classList.toggle('active', btn.dataset.theme === theme);
         });
         localStorage.setItem('theme', theme);
-      };
+    };
 
-      themeSwitcher.addEventListener('click', (event) => {
+    themeSwitcher.addEventListener('click', (event) => {
         if (event.target.tagName === 'BUTTON') {
-          applyTheme(event.target.dataset.theme);
+            applyTheme(event.target.dataset.theme);
         }
-      });
+    });
+    
+    const savedTheme = localStorage.getItem('theme') || 'classic';
+    applyTheme(savedTheme);
       
-      const savedTheme = localStorage.getItem('theme') || 'classic';
-      applyTheme(savedTheme);
-      
-      // --- BBSロジック ---
-      const threadListView = document.getElementById('thread-list-view');
-      const threadContentView = document.getElementById('thread-content-view');
-      const threadListContainer = document.getElementById('thread-list');
-      const loadingOverlay = document.getElementById('loading-overlay');
-      const loadingMessage = document.getElementById('loading-message');
+    // --- BBSロジック ---
+    const threadListView = document.getElementById('thread-list-view');
+    const threadContentView = document.getElementById('thread-content-view');
+    const threadListContainer = document.getElementById('thread-list');
+    const loadingOverlay = document.getElementById('loading-overlay');
+    const loadingMessage = document.getElementById('loading-message');
+    const postsContainer = document.getElementById('posts-container');
+    const paginationContainer = document.getElementById('pagination-container');
 
-      document.getElementById('new-thread-form').addEventListener('submit', createNewThread);
-      document.getElementById('new-post-form').addEventListener('submit', createNewPost);
-      document.getElementById('back-to-list-btn').addEventListener('click', showThreadList);
+    document.getElementById('new-thread-form').addEventListener('submit', createNewThread);
+    document.getElementById('new-post-form').addEventListener('submit', createNewPost);
+    document.getElementById('back-to-list-btn').addEventListener('click', showThreadList);
 
-      const escapeHTML = (str) => str.replace(/[&<>"']/g, (match) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[match]));
+    const escapeHTML = (str) => str.replace(/[&<>"']/g, (match) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[match]));
       
-      async function handleApiError(response) {
+    async function handleApiError(response) {
         try {
             const errorData = await response.json();
             throw new Error(errorData.error || '不明なエラーが発生しました。');
         } catch (e) { throw new Error('サーバーとの通信に失敗しました。'); }
-      }
+    }
 
-      function showLoadingOverlay(message) {
+    function showLoadingOverlay(message) {
         loadingMessage.textContent = message;
         loadingOverlay.style.display = 'flex';
-      }
+    }
 
-      function hideLoadingOverlay() {
+    function hideLoadingOverlay() {
         loadingOverlay.style.display = 'none';
-      }
+    }
       
-      function renderPosts(posts) {
-          const postsContainer = document.getElementById('posts-container');
-          postsContainer.innerHTML = '';
-          posts.sort((a, b) => a.post_number - b.post_number).forEach(post => { appendPost(post); });
-      }
+    function renderPosts(posts, clear = true) {
+        if (clear) {
+            postsContainer.innerHTML = '';
+        }
+        if (!posts || posts.length === 0) {
+            if(clear) postsContainer.innerHTML = '<p>まだ投稿がありません。</p>';
+            return;
+        }
+        posts.sort((a, b) => a.post_number - b.post_number).forEach(post => appendPost(post));
+    }
 
-      function appendPost(post) {
-        const postsContainer = document.getElementById('posts-container');
+    function appendPost(post) {
         const div = document.createElement('div');
         div.className = 'post';
         div.innerHTML = `
@@ -273,160 +284,175 @@
             </div>
             <div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>
         `;
-        const noPostMsg = postsContainer.querySelector('p.no-posts');
-        if (noPostMsg) noPostMsg.remove();
         postsContainer.appendChild(div);
-      }
+    }
+    
+    function renderPagination(threadInfo) {
+        paginationContainer.innerHTML = '';
+        const totalPosts = threadInfo.post_count;
+        const totalChunks = Math.ceil(totalPosts / CHUNK_SIZE);
+        
+        if (totalPosts > CHUNK_SIZE) {
+            const button = document.createElement('button');
+            button.textContent = 'すべてのレスを表示 (1-' + totalPosts + ')';
+            button.onclick = () => fetchAllPosts(threadInfo.id, totalChunks);
+            paginationContainer.appendChild(button);
+        }
+    }
 
-      async function fetchAndDisplayThreads() {
+    async function fetchAllPosts(threadId, totalChunks) {
+        showLoadingOverlay(`全${(totalChunks * CHUNK_SIZE).toLocaleString()}件のレスを読み込んでいます...`);
+        try {
+            const promises = [];
+            for (let i = 0; i < totalChunks; i++) {
+                promises.push(fetch(`/api/threads/${threadId}/posts?chunk=${i}`).then(res => res.json()));
+            }
+            const chunkResults = await Promise.all(promises);
+            const allPosts = chunkResults.flat();
+            renderPosts(allPosts, true);
+            paginationContainer.innerHTML = ''; // Hide button after loading all
+        } catch (error) {
+            console.error(error);
+            alert('全レスの読み込みに失敗しました。');
+        } finally {
+            hideLoadingOverlay();
+        }
+    }
+
+    async function fetchAndDisplayThreads() {
+        // (この関数は変更なし)
         let loadingTimer = setTimeout(() => showLoadingOverlay('スレッド一覧を読み込んでいます...'), 200);
         try {
-          const response = await fetch('/api/threads');
-          if (!response.ok) await handleApiError(response);
-          const threads = await response.json();
-          threadListContainer.innerHTML = '';
-          if (threads && threads.length > 0) {
-            threads.forEach(thread => {
-                const div = document.createElement('div');
-                div.className = 'thread-item';
-                div.innerHTML = `
-                  <div class="thread-details">
-                    ${thread.id}: <strong>${escapeHTML(thread.title)}</strong>
-                  </div>
-                  <div class="thread-meta">
-                    レス: ${thread.post_count}<br>
-                    更新: ${new Date(thread.last_updated).toLocaleString('ja-JP', { year:'2-digit', month:'2-digit', day:'2-digit', hour: '2-digit', minute: '2-digit'})}
-                  </div>`;
-                div.dataset.threadId = thread.id;
-                div.addEventListener('click', () => viewThread(thread.id));
-                threadListContainer.appendChild(div);
-            });
-          } else {
-            threadListContainer.innerHTML = '<p>スレッドはまだありません。</p>';
-          }
+            const response = await fetch('/api/threads');
+            if (!response.ok) await handleApiError(response);
+            const threads = await response.json();
+            threadListContainer.innerHTML = '';
+            if (threads && threads.length > 0) {
+                threads.forEach(thread => {
+                    const div = document.createElement('div');
+                    div.className = 'thread-item';
+                    div.innerHTML = `
+                    <div class="thread-details">
+                        ${thread.id}: <strong>${escapeHTML(thread.title)}</strong>
+                    </div>
+                    <div class="thread-meta">
+                        レス: ${thread.post_count}<br>
+                        更新: ${new Date(thread.last_updated).toLocaleString('ja-JP', { year:'2-digit', month:'2-digit', day:'2-digit', hour: '2-digit', minute: '2-digit'})}
+                    </div>`;
+                    div.dataset.threadId = thread.id;
+                    div.addEventListener('click', () => viewThread(thread.id));
+                    threadListContainer.appendChild(div);
+                });
+            } else {
+                threadListContainer.innerHTML = '<p>スレッドはまだありません。</p>';
+            }
         } catch (error) { console.error(error); alert(error.message); } 
         finally { clearTimeout(loadingTimer); hideLoadingOverlay(); }
-      }
+    }
 
-      async function viewThread(threadId) {
+    async function viewThread(threadId) {
         threadListView.style.display = 'none';
         threadContentView.style.display = 'block';
         window.scrollTo(0, 0);
-        const postsContainer = document.getElementById('posts-container');
         postsContainer.innerHTML = '';
+        paginationContainer.innerHTML = '';
         
         showLoadingOverlay('スレッドを読み込んでいます...');
-        let slowLoadTimer = setTimeout(() => {
-            loadingMessage.textContent = '長期間アクセスが無いスレッドは表示に時間がかかります。データを準備しています...';
-        }, 800);
-
         try {
-            const infoPromise = fetch(`/api/threads/${threadId}/info`);
-            const postsPromise = fetch(`/api/threads/${threadId}/posts`);
-
-            const [infoResponse, postsResponse] = await Promise.all([infoPromise, postsPromise]);
-
+            const infoResponse = await fetch(`/api/threads/${threadId}/info`);
             if (!infoResponse.ok) await handleApiError(infoResponse);
-            if (!postsResponse.ok) await handleApiError(postsResponse);
+            currentThreadInfo = await infoResponse.json();
 
-            const threadInfo = await infoResponse.json();
-            const allPosts = await postsResponse.json();
-
-            document.getElementById('thread-title').textContent = threadInfo.title;
-            document.getElementById('current-thread-id').value = threadInfo.id;
+            document.getElementById('thread-title').textContent = currentThreadInfo.title;
+            document.getElementById('current-thread-id').value = currentThreadInfo.id;
             
-            if (allPosts.length === 0) {
-                postsContainer.innerHTML = '<p class="no-posts">まだ投稿がありません。</p>';
-            } else {
-                renderPosts(allPosts);
-            }
-        } catch (error) {
-          console.error(error);
-          postsContainer.innerHTML = `<p style="color: red; font-weight: bold;">エラー: ${escapeHTML(error.message)}</p>`;
-        } finally {
-          clearTimeout(slowLoadTimer);
-          hideLoadingOverlay();
-        }
-      }
+            const initialChunkIndex = Math.floor((currentThreadInfo.post_count - 1) / CHUNK_SIZE);
+            const postsResponse = await fetch(`/api/threads/${threadId}/posts?chunk=${initialChunkIndex}`);
+            if (!postsResponse.ok) await handleApiError(postsResponse);
+            
+            const initialPosts = await postsResponse.json();
+            
+            renderPosts(initialPosts);
+            renderPagination(currentThreadInfo);
 
-      async function createNewThread(event) {
+        } catch (error) {
+            console.error(error);
+            postsContainer.innerHTML = `<p style="color: red; font-weight: bold;">エラー: ${escapeHTML(error.message)}</p>`;
+        } finally {
+            hideLoadingOverlay();
+        }
+    }
+
+    async function createNewThread(event) {
+        // (この関数は変更なし)
         event.preventDefault();
         const form = event.target;
         const button = form.querySelector('button');
         button.disabled = true;
         try {
-          const response = await fetch('/api/threads', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              title: document.getElementById('new-thread-title').value,
-              author: document.getElementById('new-thread-author').value,
-              body: document.getElementById('new-thread-body').value
-            })
-          });
-          if (!response.ok) await handleApiError(response);
-          form.reset();
-          await fetchAndDisplayThreads();
+            const response = await fetch('/api/threads', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: document.getElementById('new-thread-title').value,
+                    author: document.getElementById('new-thread-author').value,
+                    body: document.getElementById('new-thread-body').value
+                })
+            });
+            if (!response.ok) await handleApiError(response);
+            form.reset();
+            await fetchAndDisplayThreads();
         } catch(error) { console.error(error); alert(error.message); } 
         finally { button.disabled = false; }
-      }
+    }
 
-      // =================================================================
-      // ▼▼▼ ここからが変更された関数です ▼▼▼
-      // =================================================================
-      async function createNewPost(event) {
+    async function createNewPost(event) {
         event.preventDefault();
         const form = event.target;
         const button = form.querySelector('button');
         const threadId = document.getElementById('current-thread-id').value;
-        
         button.disabled = true;
         
         try {
-          // 1. 投稿APIを呼び出し、レスポンスとして最新の全投稿リストを受け取る
-          const response = await fetch(`/api/threads/${threadId}/posts`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              author: document.getElementById('new-post-author').value,
-              body: document.getElementById('new-post-body').value
-            })
-          });
-          
-          if (!response.ok) await handleApiError(response);
-          
-          // 2. レスポンスのJSON（全投稿リスト）を取得
-          const allPosts = await response.json();
+            const response = await fetch(`/api/threads/${threadId}/posts`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    author: document.getElementById('new-post-author').value,
+                    body: document.getElementById('new-post-body').value
+                })
+            });
+            if (!response.ok) await handleApiError(response);
+            
+            const { new_post_count, latest_chunk_posts } = await response.json();
+            
+            form.reset();
+            
+            const currentTotalPosts = currentThreadInfo.post_count;
+            const isNewChunk = Math.floor((currentTotalPosts - 1) / CHUNK_SIZE) !== Math.floor((new_post_count - 1) / CHUNK_SIZE);
 
-          // 3. 投稿成功後、フォームの内容をクリア
-          form.reset(); 
-          
-          // 4. 受け取ったデータで投稿コンテナを再描画
-          renderPosts(allPosts);
-          
-          // 5. ページの一番下にスクロール
-          window.scrollTo(0, document.body.scrollHeight);
+            renderPosts(latest_chunk_posts, isNewChunk);
 
+            currentThreadInfo.post_count = new_post_count;
+            renderPagination(currentThreadInfo);
+
+            window.scrollTo(0, document.body.scrollHeight);
         } catch(error) {
-          console.error(error);
-          alert(error.message);
+            console.error(error);
+            alert(error.message);
         } finally {
-          // 6. 成功時もエラー時もボタンを再度有効にする
-          button.disabled = false;
+            button.disabled = false;
         }
-      }
-      // =================================================================
-      // ▲▲▲ ここまでが変更された関数です ▲▲▲
-      // =================================================================
+    }
 
-      function showThreadList() {
+    function showThreadList() {
         threadContentView.style.display = 'none';
         threadListView.style.display = 'block';
         fetchAndDisplayThreads();
-      }
+    }
 
-      fetchAndDisplayThreads();
-    });
-  </script>
+    fetchAndDisplayThreads();
+});
+</script>
 </body>
 </html>
