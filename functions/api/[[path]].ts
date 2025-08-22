@@ -56,8 +56,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
     // POSTリクエストのルーティング
     if (method === 'POST') {
-      // ▼▼▼ エラー修正点 ▼▼▼
-      // POSTリクエストのボディはここで一度だけ読み込む
       const body = await request.json<any>();
 
       if (path === '/api/threads') {
@@ -75,7 +73,6 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     });
 
   } catch (e: any) {
-    // ボディ読み取りエラーなどもここでキャッチされる
     if (e instanceof TypeError && e.message.includes('disturbed')) {
         console.error("API Error: Attempted to read request body twice.", e);
         return new Response(JSON.stringify({ error: "Internal server error: Could not process request body."}), { status: 500 });
@@ -124,10 +121,9 @@ async function getThreadInfo(context: EventContext<Env, any, any>, threadId: num
     return new Response(JSON.stringify(threadInfo), { headers: { "Content-Type": "application/json" } });
 }
 
-// ▼▼▼ エラー修正点 ▼▼▼
 async function createThread(context: EventContext<Env, any, any>, body: { title: string; author: string; body: string }): Promise<Response> {
   const { request, env, waitUntil } = context;
-  const { title, author, body: postBody } = body; // `body`が変数名として被るので`postBody`に変更
+  const { title, author, body: postBody } = body;
   if (!title || !postBody) return new Response(JSON.stringify({ error: "Title and body are required." }), { status: 400 });
 
   const threadResult = await env.MY_D1_DATABASE2.prepare("INSERT INTO threads (title) VALUES (?) RETURNING id").bind(title).first<{ id: number }>();
@@ -144,7 +140,10 @@ async function createThread(context: EventContext<Env, any, any>, body: { title:
   const cache = caches.default;
   const url = new URL(request.url);
   const threadsCacheUrl = `${url.protocol}//${url.host}/api/threads`;
-  waitUntil(cache.delete(new Request(threadsCacheUrl, request)));
+  
+  // ▼▼▼ ここが修正された行です ▼▼▼
+  // 第2引数の`request`を削除し、URLのみを渡すように変更
+  waitUntil(cache.delete(new Request(threadsCacheUrl)));
 
   return new Response(JSON.stringify({ id: newThreadId }), { status: 201, headers: { "Content-Type": "application/json" } });
 }
@@ -168,7 +167,6 @@ async function getPostsForThread(context: EventContext<Env, any, any>, threadId:
   let cacheTtl = D1_CACHE_TTL;
 
   if (chunkIndex < threadInfo.archived_chunk_count) {
-    // R2から取得
     const r2Key = `thread/${threadId}/${chunkIndex}.json`;
     const r2Object = await env.MY_R2_BUCKET2.get(r2Key);
     if (r2Object) {
@@ -176,8 +174,6 @@ async function getPostsForThread(context: EventContext<Env, any, any>, threadId:
         cacheTtl = R2_CACHE_TTL;
     }
   } else {
-    // D1から取得
-    // D1上のオフセットを計算
     const d1Offset = (chunkIndex - threadInfo.archived_chunk_count) * CHUNK_SIZE;
     const { results } = await env.MY_D1_DATABASE2.prepare(
         "SELECT * FROM posts WHERE thread_id = ? ORDER BY post_number ASC LIMIT ? OFFSET ?"
@@ -195,7 +191,6 @@ async function getPostsForThread(context: EventContext<Env, any, any>, threadId:
   return response;
 }
 
-// ▼▼▼ エラー修正点 ▼▼▼
 async function createPost(context: EventContext<Env, any, any>, threadId: number, body: { author: string; body: string }): Promise<Response> {
   const { request, env, waitUntil } = context;
   const { author, body: postBody } = body;
@@ -235,7 +230,7 @@ async function createPost(context: EventContext<Env, any, any>, threadId: number
 }
 
 async function archiveChunk(context: EventContext<Env, any, any>, threadId: number, chunkToArchive: number) {
-    const { env } = context;
+    const { env, request } = context; // request を追加
     console.log(`Archiving chunk ${chunkToArchive} for thread ${threadId}`);
     try {
         const threadInfo = await env.MY_D1_DATABASE2.prepare(
@@ -243,7 +238,6 @@ async function archiveChunk(context: EventContext<Env, any, any>, threadId: numb
         ).bind(threadId).first<{ archived_chunk_count: number }>();
         if (!threadInfo) return;
         
-        // アーカイブするチャンクのD1内でのオフセットを計算
         const d1Offset = (chunkToArchive - threadInfo.archived_chunk_count) * CHUNK_SIZE;
 
         const { results, success } = await env.MY_D1_DATABASE2.prepare(
@@ -268,7 +262,7 @@ async function archiveChunk(context: EventContext<Env, any, any>, threadId: numb
             "UPDATE threads_meta SET archived_chunk_count = archived_chunk_count + 1 WHERE id = ?"
         ).bind(threadId).run();
 
-        const url = new URL(context.request.url);
+        const url = new URL(request.url);
         const cacheUrl = `${url.protocol}//${url.host}/api/threads/${threadId}/posts?chunk=${chunkToArchive}`;
         await caches.default.delete(new Request(cacheUrl));
         console.log(`Archived and purged cache for chunk ${chunkToArchive}`);
@@ -296,7 +290,7 @@ async function updateLatestChunkCache(context: EventContext<Env, any, any>, thre
 
     const url = new URL(request.url);
     const cacheUrl = `${url.protocol}//${url.host}/api/threads/${threadId}/posts?chunk=${latestChunkIndex}`;
-    const cacheKey = new Request(cacheUrl, request);
+    const cacheKey = new Request(cacheUrl);
     
     const cacheResponse = new Response(JSON.stringify(results), {
         headers: {
