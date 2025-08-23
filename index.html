@@ -247,15 +247,11 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) { throw new Error('サーバーとの通信に失敗'); }
     }
 
-    // ▼▼▼ 変更点：UTC日付文字列を正しく解釈するヘルパー関数 ▼▼▼
     const parseUTCDate = (dateString) => {
         if (!dateString) return null;
-        // "YYYY-MM-DD HH:MM:SS" のような形式を "YYYY-MM-DDTHH:MM:SSZ" に変換
-        // これにより、new Date() はこの文字列をUTCとして正しく解釈する
         const isoString = dateString.replace(' ', 'T') + 'Z';
         return new Date(isoString);
     };
-    // ▲▲▲ 変更点 ▲▲▲
 
     // --- Navigation & Router ---
     const navigate = (path) => {
@@ -338,7 +334,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const a = document.createElement('a');
                 a.href = `/${genre}/${thread.id}`;
                 a.className = 'thread-item';
-                // ▼▼▼ 変更点：parseUTCDateを使い、表示形式も調整 ▼▼▼
                 const lastUpdatedDate = parseUTCDate(thread.last_updated);
                 const formattedDate = lastUpdatedDate.toLocaleString('ja-JP', {
                     year: '2-digit', month: '2-digit', day: '2-digit',
@@ -350,7 +345,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         レス: ${thread.post_count}<br>
                         更新: ${formattedDate}
                     </div>`;
-                // ▲▲▲ 変更点 ▲▲▲
                 a.onclick = (e) => { e.preventDefault(); navigate(`/${genre}/${thread.id}`); };
                 threadListContainer.appendChild(a);
             });
@@ -387,7 +381,6 @@ document.addEventListener('DOMContentLoaded', () => {
         posts.sort((a, b) => a.post_number - b.post_number).forEach(post => {
             const div = document.createElement('div');
             div.className = 'post';
-            // ▼▼▼ 変更点：parseUTCDateを使い、表示形式とタイムゾーンも指定 ▼▼▼
             const createdAtDate = parseUTCDate(post.created_at);
             const formattedDate = createdAtDate.toLocaleString('ja-JP', {
                 year: 'numeric', month: '2-digit', day: '2-digit',
@@ -397,7 +390,6 @@ document.addEventListener('DOMContentLoaded', () => {
             div.innerHTML = `
                 <div class="post-header"><span>${post.post_number}: ${escapeHTML(post.author || '名無しさん')}</span><span class="post-date">${formattedDate}</span></div>
                 <div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>`;
-            // ▲▲▲ 変更点 ▲▲▲
             postsContainer.appendChild(div);
         });
     };
@@ -484,10 +476,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const { new_post_count, latest_chunk_posts } = await res.json();
             form.reset();
             
-            const oldPostCount = currentState.threadInfo.post_count;
-            const isNewChunk = Math.floor((oldPostCount - 1) / CHUNK_SIZE) !== Math.floor((new_post_count - 1) / CHUNK_SIZE);
+            // 投稿が重複するバグを修正: 常にtrueを渡し、表示をクリアしてから再描画する
+            renderPosts(latest_chunk_posts, true);
 
-            renderPosts(latest_chunk_posts, isNewChunk);
             currentState.threadInfo.post_count = new_post_count;
             renderPagination(currentState.threadInfo);
             window.scrollTo(0, document.body.scrollHeight);
