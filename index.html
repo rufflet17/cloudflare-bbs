@@ -167,6 +167,11 @@
   </header>
 
   <main>
+    <div id="auth-controls" style="text-align: right; margin-bottom: 10px;">
+        <span id="user-display"></span>
+        <button id="login-btn" onclick="login()">Googleでログイン</button>
+        <button id="logout-btn" onclick="logout()" style="display:none;">ログアウト</button>
+    </div>
     <div class="theme-switcher">
         <button data-theme="classic">クラシック</button>
         <button data-theme="modern">モダン</button>
@@ -188,7 +193,7 @@
       <form id="new-thread-form">
         <input type="hidden" id="new-thread-genre">
         <input type="text" id="new-thread-title" placeholder="スレッドタイトル" required>
-        <input type="text" id="new-thread-author" placeholder="名前 (省略可)">
+        <input type="text" id="new-thread-author" placeholder="ログインすると名前が自動入力されます" readonly>
         <textarea id="new-thread-body" placeholder="最初の書き込み" rows="4" required></textarea>
         <button type="submit">スレッド作成</button>
       </form>
@@ -204,12 +209,65 @@
       <h3>レスを書き込む</h3>
       <form id="new-post-form">
         <input type="hidden" id="current-thread-id">
-        <input type="text" id="new-post-author" placeholder="名前 (省略可)">
+        <input type="text" id="new-post-author" placeholder="ログインすると名前が自動入力されます" readonly>
         <textarea id="new-post-body" placeholder="書き込み内容" rows="4" required></textarea>
         <button type="submit">書き込む</button>
       </form>
     </div>
   </main>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDSfTZRS0Smjnxns4hEzDibrY9dDIEMpgQ",
+    authDomain: "thread-fb369.firebaseapp.com",
+    projectId: "thread-fb369",
+    storageBucket: "thread-fb369.firebasestorage.app",
+    messagingSenderId: "259512543030",
+    appId: "1:259512543030:web:cb6674ae37384371c0b597",
+    measurementId: "G-2EWG4EWCQR"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const provider = new GoogleAuthProvider();
+
+  window.authState = { user: null, idToken: null };
+
+  onAuthStateChanged(auth, async (user) => {
+    const userDisplay = document.getElementById('user-display');
+    const loginBtn = document.getElementById('login-btn');
+    const logoutBtn = document.getElementById('logout-btn');
+    const newThreadAuthorInput = document.getElementById('new-thread-author');
+    const newPostAuthorInput = document.getElementById('new-post-author');
+
+    if (user) {
+      window.authState.user = user;
+      window.authState.idToken = await user.getIdToken(true);
+      userDisplay.textContent = `${user.displayName} さん`;
+      loginBtn.style.display = 'none';
+      logoutBtn.style.display = 'inline';
+      if(newThreadAuthorInput) newThreadAuthorInput.value = user.displayName;
+      if(newPostAuthorInput) newPostAuthorInput.value = user.displayName;
+    } else {
+      window.authState.user = null;
+      window.authState.idToken = null;
+      userDisplay.textContent = '';
+      loginBtn.style.display = 'inline';
+      logoutBtn.style.display = 'none';
+      if(newThreadAuthorInput) newThreadAuthorInput.value = '';
+      if(newPostAuthorInput) newPostAuthorInput.value = '';
+    }
+  });
+
+  window.login = async () => {
+    try { await signInWithPopup(auth, provider); } 
+    catch (error) { console.error("ログインエラー:", error); }
+  };
+  window.logout = async () => { await signOut(auth); };
+</script>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
@@ -301,7 +359,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- View Preparation Functions ---
     const prepareHomeView = async () => {
-        const res = await fetch('/api/genres');
+        const res = await fetch('/api/genres', { cache: 'no-cache' });
         if (!res.ok) await handleApiError(res);
         const genres = await res.json();
         
@@ -321,7 +379,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const prepareThreadListView = async (genre) => {
-        const res = await fetch(`/api/threads?genre=${genre}`);
+        const res = await fetch(`/api/threads?genre=${genre}`, { cache: 'no-cache' });
         if (!res.ok) await handleApiError(res);
         const threads = await res.json();
 
@@ -354,7 +412,6 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const prepareThreadContentView = async (threadId) => {
-        // [修正点] fetchに { cache: 'no-cache' } を追加し、ブラウザキャッシュをバイパスさせる
         const infoRes = await fetch(`/api/threads/${threadId}/info`, { cache: 'no-cache' });
         if (!infoRes.ok) await handleApiError(infoRes);
         const threadInfo = await infoRes.json();
@@ -364,7 +421,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('current-thread-id').value = threadInfo.id;
         
         const initialChunk = Math.floor((threadInfo.post_count - 1) / CHUNK_SIZE);
-        // [修正点] fetchに { cache: 'no-cache' } を追加し、ブラウザキャッシュをバイパスさせる
         const postsRes = await fetch(`/api/threads/${threadId}/posts?chunk=${initialChunk}`, { cache: 'no-cache' });
         if (!postsRes.ok) await handleApiError(postsRes);
         
@@ -412,7 +468,6 @@ document.addEventListener('DOMContentLoaded', () => {
         button.textContent = '読み込んでいます...';
             
         try {
-            // [修正点] fetchに { cache: 'no-cache' } を追加し、ブラウザキャッシュをバイパスさせる
             const promises = Array.from({ length: totalChunks }, (_, i) => 
                 fetch(`/api/threads/${threadId}/posts?chunk=${i}`, { cache: 'no-cache' }).then(res => res.json())
             );
@@ -435,6 +490,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('new-thread-form').addEventListener('submit', async (e) => {
         e.preventDefault();
+        const idToken = window.authState.idToken;
+        if (!idToken) {
+            alert("スレッドを作成するにはログインが必要です。");
+            return;
+        }
         const form = e.target;
         const button = form.querySelector('button');
         button.disabled = true;
@@ -442,7 +502,10 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const res = await fetch('/api/threads', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
                 body: JSON.stringify({
                     genre: genre,
                     title: document.getElementById('new-thread-title').value,
@@ -452,6 +515,9 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             if (!res.ok) await handleApiError(res);
             form.reset();
+            if (window.authState.user) {
+              document.getElementById('new-thread-author').value = window.authState.user.displayName;
+            }
             await prepareThreadListView(genre); 
         } catch(error) {
             console.error(error); alert(error.message);
@@ -462,6 +528,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('new-post-form').addEventListener('submit', async (e) => {
         e.preventDefault();
+        const idToken = window.authState.idToken;
+        if (!idToken) {
+            alert("書き込むにはログインが必要です。");
+            return;
+        }
         const form = e.target;
         const button = form.querySelector('button');
         const threadId = document.getElementById('current-thread-id').value;
@@ -469,7 +540,10 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const res = await fetch(`/api/threads/${threadId}/posts`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
                 body: JSON.stringify({
                     author: document.getElementById('new-post-author').value,
                     body: document.getElementById('new-post-body').value
@@ -478,8 +552,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!res.ok) await handleApiError(res);
             const { new_post_count, latest_chunk_posts } = await res.json();
             form.reset();
+            if (window.authState.user) {
+              document.getElementById('new-post-author').value = window.authState.user.displayName;
+            }
             
-            // 投稿が重複するバグを修正: 常にtrueを渡し、表示をクリアしてから再描画する
             renderPosts(latest_chunk_posts, true);
 
             currentState.threadInfo.post_count = new_post_count;
