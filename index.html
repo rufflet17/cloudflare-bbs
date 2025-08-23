@@ -39,14 +39,17 @@
     .list-item:hover, #thread-list .thread-item:hover { background-color: var(--thread-hover-bg); }
     .thread-details { flex-grow: 1; }
     .thread-meta { font-size: 0.8em; color: #666; text-align: right; white-space: nowrap; }
-    .post { margin-bottom: 15px; padding-left: 10px; border-left: 3px solid var(--post-border-color); }
-    .post-header { font-size: 0.9em; color: var(--post-name-color); font-weight: bold; }
+    .post { margin-bottom: 15px; padding-left: 10px; border-left: 3px solid var(--post-border-color); transition: background-color 0.2s, border-color 0.2s; }
+    .post-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.9em; color: var(--post-name-color); font-weight: bold; cursor: pointer; }
+    .post-header-main { display: flex; align-items: center; }
     .post-header .post-date { color: var(--post-meta-color); font-weight: normal; margin-left: 10px; }
     .post-body { margin-left: 1em; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
     .post-number { text-decoration: underline; }
-    .bookmark-icon { margin-left: 5px; cursor: pointer; color: var(--accent-color); font-style: normal; }
+    .bookmark-icon { margin-left: 5px; color: var(--accent-color); font-style: normal; }
+    .post.bookmarked { background-color: var(--thread-hover-bg); border-left-color: var(--accent-color); }
     body[data-theme="modern"] .post { border-left: none; padding: 15px; background-color: var(--bg-color); border: 1px solid var(--border-color); border-radius: 6px; }
     body[data-theme="modern"] .post-body { margin-left: 0; }
+    body[data-theme="modern"] .post.bookmarked { border: 1px solid var(--accent-color); background-color: var(--thread-hover-bg); box-shadow: 0 1px 4px rgba(52, 152, 219, 0.2); }
     #posts-loader { text-align: center; margin-bottom: 15px; }
     .view { display: none; }
     
@@ -55,37 +58,28 @@
     .modal-content {
         background-color: #fdf6e3; color: #586e75; font-family: 'Georgia', 'Yu Mincho', 'Hiragino Mincho ProN', serif;
         width: 90%; max-width: 800px; height: 80vh; max-height: 600px;
-        padding: 40px 50px; border: 1px solid #d3c2a5; border-radius: 2px 10px 10px 2px;
+        padding: 40px 50px 60px 50px; border: 1px solid #d3c2a5; border-radius: 2px 10px 10px 2px;
         box-shadow: -10px 10px 15px rgba(0, 0, 0, 0.3), inset 0 0 20px rgba(0, 0, 0, 0.1);
         position: relative; overflow-y: auto;
     }
-    .modal-content::before { /* 中央の綴じ目の影 */
-        content: ''; position: absolute; top: 0; left: 50%; width: 30px; height: 100%;
-        transform: translateX(-50%);
-        background: linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(0,0,0,0.15) 45%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.15) 55%, rgba(0,0,0,0) 100%);
-        pointer-events: none; border-radius: inherit;
-    }
-    .modal-content::after { /* 栞紐 */
-        content: ''; position: absolute; top: -2px; left: 58%; width: 15px; height: 60px;
-        background-color: #b52a32; border: 1px solid rgba(0,0,0,0.2); border-top: none;
-        border-bottom-left-radius: 8px; border-bottom-right-radius: 8px;
-        box-shadow: 0 3px 5px rgba(0,0,0,0.2); z-index: 1;
-    }
+    .modal-content::before { content: ''; position: absolute; top: 0; left: 50%; width: 30px; height: 100%; transform: translateX(-50%); background: linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(0,0,0,0.15) 45%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.15) 55%, rgba(0,0,0,0) 100%); pointer-events: none; border-radius: inherit; }
+    .modal-content::after { content: ''; position: absolute; top: -2px; left: 58%; width: 15px; height: 60px; background-color: #b52a32; border: 1px solid rgba(0,0,0,0.2); border-top: none; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; box-shadow: 0 3px 5px rgba(0,0,0,0.2); z-index: 1; }
     .modal-close { position: absolute; top: 10px; right: 15px; font-size: 2em; line-height: 1; background: none; border: none; color: #839496; cursor: pointer; z-index: 2; transition: color 0.2s; }
     .modal-close:hover { color: #002b36; }
-    
     #bookmark-view-content h3 { text-align: center; font-size: 1.5em; border-bottom: 2px solid #b58900; padding-bottom: 15px; margin-bottom: 25px; color: #657b83; }
     #bookmark-view-content .bookmark-item { border-bottom: 1px dashed #d3c2a5; padding: 15px 5px; cursor: pointer; transition: background-color 0.2s; display: flex; justify-content: space-between; align-items: center; }
     #bookmark-view-content .bookmark-item:hover { background-color: rgba(181, 137, 0, 0.08); }
-    #bookmark-view-content .bookmark-item .post-body { color: #657b83; font-size: 0.95em; max-height: 3.2em; overflow: hidden; }
-    #bookmark-view-content button {
-        font-family: var(--font-modern); font-size: 0.8em; padding: 4px 8px; border: 1px solid #b58900;
-        background-color: transparent; color: #b58900; border-radius: 4px; cursor: pointer; transition: all 0.2s;
-    }
+    #bookmark-view-content .post-summary, #bookmark-view-content .post-body { color: #657b83; font-size: 0.95em; }
+    #bookmark-view-content .post-summary { margin-top: 4px; }
+    #bookmark-view-content .post-body { max-height: 3.2em; overflow: hidden; }
+    #bookmark-view-content button { font-family: var(--font-modern); font-size: 0.8em; padding: 4px 8px; border: 1px solid #b58900; background-color: transparent; color: #b58900; border-radius: 4px; cursor: pointer; transition: all 0.2s; }
     #bookmark-view-content button:hover { background-color: #b58900; color: #fdf6e3; }
     #bookmark-view-content .back-button { margin-bottom: 15px !important; }
-    #bookmark-view-content .bookmark-delete-btn { border-color: #dc3545; color: #dc3545; background-color: transparent; }
+    #bookmark-view-content .bookmark-delete-btn { border-color: #dc3545; color: #dc3545; }
     #bookmark-view-content .bookmark-delete-btn:hover { background-color: #dc3545; color: #fff; }
+    #bookmark-options { position: absolute; bottom: 15px; left: 50px; font-size: 0.9em; color: #657b83; z-index: 2; }
+    #bookmark-options label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+    #bookmark-options input { width: auto; padding: 0; margin: 0; }
   </style>
 </head>
 <body data-theme="classic">
@@ -113,41 +107,16 @@
         <button data-theme="classic">クラシック</button>
         <button data-theme="modern">モダン</button>
     </div>
-
-    <!-- ホーム（ジャンル一覧）ビュー -->
-    <div id="home-view" class="view">
-        <h2>ジャンル一覧</h2>
-        <div id="genre-list"></div>
-    </div>
-    
-    <!-- スレッド一覧ビュー -->
+    <div id="home-view" class="view"><h2>ジャンル一覧</h2><div id="genre-list"></div></div>
     <div id="thread-list-view" class="view">
       <h2 id="thread-list-title"></h2>
-      <div id="thread-list"></div>
-      <hr>
-      <h3>新しいスレッドを立てる</h3>
-      <form id="new-thread-form">
-        <input type="hidden" id="new-thread-genre">
-        <input type="text" id="new-thread-title" placeholder="スレッドタイトル" required>
-        <input type="text" id="new-thread-author" placeholder="名前 (省略可)">
-        <textarea id="new-thread-body" placeholder="最初の書き込み" rows="4" required></textarea>
-        <button type="submit">スレッド作成</button>
-      </form>
+      <div id="thread-list"></div><hr><h3>新しいスレッドを立てる</h3>
+      <form id="new-thread-form"><input type="hidden" id="new-thread-genre"><input type="text" id="new-thread-title" placeholder="スレッドタイトル" required><input type="text" id="new-thread-author" placeholder="名前 (省略可)"><textarea id="new-thread-body" placeholder="最初の書き込み" rows="4" required></textarea><button type="submit">スレッド作成</button></form>
     </div>
-    
-    <!-- スレッド内容ビュー -->
     <div id="thread-content-view" class="view">
       <h2 id="thread-title"></h2>
-      <div id="posts-loader"></div>
-      <div id="posts-container"></div>
-      <hr>
-      <h3>レスを書き込む</h3>
-      <form id="new-post-form">
-        <input type="hidden" id="current-thread-id">
-        <input type="text" id="new-post-author" placeholder="名前 (省略可)">
-        <textarea id="new-post-body" placeholder="書き込み内容" rows="4" required></textarea>
-        <button type="submit">書き込む</button>
-      </form>
+      <div id="posts-loader"></div><div id="posts-container"></div><hr><h3>レスを書き込む</h3>
+      <form id="new-post-form"><input type="hidden" id="current-thread-id"><input type="text" id="new-post-author" placeholder="名前 (省略可)"><textarea id="new-post-body" placeholder="書き込み内容" rows="4" required></textarea><button type="submit">書き込む</button></form>
     </div>
   </main>
 
@@ -156,6 +125,12 @@
     <div class="modal-content">
       <button class="modal-close" onclick="closeBookmarkModal()">×</button>
       <div id="bookmark-view-content"></div>
+      <div id="bookmark-options">
+        <label>
+          <input type="checkbox" id="auto-delete-bookmark-checkbox">
+          ジャンプ後に栞を自動削除する
+        </label>
+      </div>
     </div>
   </div>
 
@@ -214,6 +189,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const bookmarkViewContent = document.getElementById('bookmark-view-content');
     const backToHomeBtnHeader = document.getElementById('back-to-home-btn-header');
     const backToThreadListBtnHeader = document.getElementById('back-to-thread-list-btn-header');
+    const autoDeleteBookmarkCheckbox = document.getElementById('auto-delete-bookmark-checkbox');
     
     // --- Bookmark Manager ---
     const BookmarkManager = {
@@ -225,7 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!allData[threadId]) { allData[threadId] = { title: threadTitle, bookmarks: {} }; }
             const threadBookmarks = allData[threadId].bookmarks;
             if (threadBookmarks[post.post_number]) { delete threadBookmarks[post.post_number]; } 
-            else { threadBookmarks[post.post_number] = { content: post.body, timestamp: Date.now() }; }
+            else { threadBookmarks[post.post_number] = { content: post.body }; }
             if (Object.keys(threadBookmarks).length === 0) { delete allData[threadId]; }
             BookmarkManager.saveAll(allData);
             return !!threadBookmarks[post.post_number];
@@ -249,6 +225,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    // --- Bookmark Auto-Delete Option ---
+    const AUTO_DELETE_KEY = 'bbs_auto_delete_bookmark';
+    const initAutoDeleteOption = () => {
+        const savedValue = localStorage.getItem(AUTO_DELETE_KEY) === 'true';
+        autoDeleteBookmarkCheckbox.checked = savedValue;
+        autoDeleteBookmarkCheckbox.addEventListener('change', (e) => {
+            localStorage.setItem(AUTO_DELETE_KEY, e.target.checked);
+        });
+    };
+    initAutoDeleteOption();
+
     // --- Theme Switcher ---
     const themeSwitcher = document.querySelector('.theme-switcher');
     const themeButtons = themeSwitcher.querySelectorAll('button');
@@ -264,16 +251,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const escapeHTML = (str) => str.replace(/[&<>"']/g, (match) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[match]));
     async function handleApiError(response) { try { const d = await response.json(); throw new Error(d.error || '不明なエラー'); } catch (e) { throw new Error('サーバー通信失敗'); } }
     const parseUTCDate = (dateString) => dateString ? new Date(dateString.replace(' ', 'T') + 'Z') : null;
-    const getRelativeTime = (timestamp) => {
-        const diff = (new Date() - new Date(timestamp)) / 1000;
-        const MIN = 60, HOUR = 3600, DAY = 86400, WEEK = 604800, MONTH = 2629746, YEAR = 31556952;
-        if (diff < HOUR) return `${Math.floor(diff / MIN)}分前`;
-        if (diff < DAY) return `${Math.floor(diff / HOUR)}時間前`;
-        if (diff < WEEK) return `${Math.floor(diff / DAY)}日前`;
-        if (diff < MONTH) return `${Math.floor(diff / WEEK)}週間前`;
-        if (diff < YEAR) return `${Math.floor(diff / MONTH)}ヶ月前`;
-        return `${Math.floor(diff / YEAR)}年前`;
-    };
 
     // --- Navigation & Router ---
     window.navigate = (path) => { history.pushState(null, '', path); router(); };
@@ -312,18 +289,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!res.ok) await handleApiError(res);
         const genres = await res.json();
         genreListContainer.innerHTML = '';
-        if (genres && genres.length > 0) {
-            genres.forEach(({ genre }) => {
-                const a = document.createElement('a');
-                a.href = `/${genre}`;
-                a.className = 'list-item';
-                a.innerHTML = `<strong>${escapeHTML(genre)}</strong>`;
-                a.onclick = (e) => { e.preventDefault(); navigate(`/${genre}`); };
-                genreListContainer.appendChild(a);
-            });
-        } else {
-            genreListContainer.innerHTML = '<p>ジャンルはまだありません。</p>';
-        }
+        if (genres && genres.length > 0) { genres.forEach(({ genre }) => { const a = document.createElement('a'); a.href = `/${genre}`; a.className = 'list-item'; a.innerHTML = `<strong>${escapeHTML(genre)}</strong>`; a.onclick = (e) => { e.preventDefault(); navigate(`/${genre}`); }; genreListContainer.appendChild(a); }); } else { genreListContainer.innerHTML = '<p>ジャンルはまだありません。</p>'; }
     };
     const prepareThreadListView = async (genre) => {
         const res = await fetch(`/api/threads?genre=${genre}`, { cache: 'no-cache' });
@@ -332,20 +298,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('thread-list-title').textContent = `${escapeHTML(genre)} のスレッド一覧`;
         document.getElementById('new-thread-genre').value = genre;
         threadListContainer.innerHTML = '';
-        if (threads && threads.length > 0) {
-            threads.forEach(thread => {
-                const a = document.createElement('a');
-                a.href = `/${genre}/${thread.id}`;
-                a.className = 'thread-item';
-                const lastUpdatedDate = parseUTCDate(thread.last_updated);
-                const formattedDate = lastUpdatedDate.toLocaleString('ja-JP', { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-                a.innerHTML = `<div class="thread-details"><strong>${escapeHTML(thread.title)}</strong></div><div class="thread-meta">レス: ${thread.post_count}<br>更新: ${formattedDate}</div>`;
-                a.onclick = (e) => { e.preventDefault(); navigate(`/${genre}/${thread.id}`); };
-                threadListContainer.appendChild(a);
-            });
-        } else {
-            threadListContainer.innerHTML = '<p>スレッドはまだありません。</p>';
-        }
+        if (threads && threads.length > 0) { threads.forEach(thread => { const a = document.createElement('a'); a.href = `/${genre}/${thread.id}`; a.className = 'thread-item'; const lastUpdatedDate = parseUTCDate(thread.last_updated); const formattedDate = lastUpdatedDate.toLocaleString('ja-JP', { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); a.innerHTML = `<div class="thread-details"><strong>${escapeHTML(thread.title)}</strong></div><div class="thread-meta">レス: ${thread.post_count}<br>更新: ${formattedDate}</div>`; a.onclick = (e) => { e.preventDefault(); navigate(`/${genre}/${thread.id}`); }; threadListContainer.appendChild(a); }); } else { threadListContainer.innerHTML = '<p>スレッドはまだありません。</p>'; }
     };
     const prepareThreadContentView = async (threadId, jumpToPostNumber = null) => {
         postsContainer.innerHTML = '読み込み中...';
@@ -354,10 +307,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!infoRes.ok) await handleApiError(infoRes);
         const threadInfo = await infoRes.json();
         currentState = { ...currentState, threadInfo, threadId, posts: [], loadedChunks: new Set() };
-        
         document.getElementById('thread-title').textContent = threadInfo.title;
         document.getElementById('current-thread-id').value = threadInfo.id;
-        
         let initialPosts = [];
         if (jumpToPostNumber) {
             const targetChunk = Math.floor((jumpToPostNumber - 1) / CHUNK_SIZE);
@@ -365,11 +316,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const endChunk = targetChunk + chunksNeeded - 1;
             const chunksToFetch = Array.from({length: endChunk - targetChunk + 1}, (_, i) => targetChunk + i);
             initialPosts = await fetchPostChunks(chunksToFetch);
-            
             const remainingPosts = threadInfo.post_count - ((endChunk + 1) * CHUNK_SIZE);
-            if (remainingPosts > 0) {
-                postsLoader.insertAdjacentHTML('beforeend', `<button onclick="loadMorePosts(this, ${endChunk + 1})">続きから読む (${remainingPosts}レス)</button>`);
-            }
+            if (remainingPosts > 0) { postsLoader.insertAdjacentHTML('beforeend', `<button onclick="loadMorePosts(this, ${endChunk + 1})">続きから読む (${remainingPosts}レス)</button>`); }
         } else {
             const latestChunk = Math.floor((threadInfo.post_count - 1) / CHUNK_SIZE);
             const chunksNeeded = Math.ceil(POSTS_PER_PAGE / CHUNK_SIZE);
@@ -377,175 +325,99 @@ document.addEventListener('DOMContentLoaded', () => {
             const chunksToFetch = Array.from({length: latestChunk - startChunk + 1}, (_, i) => startChunk + i);
             initialPosts = await fetchPostChunks(chunksToFetch);
         }
-        
         currentState.posts = initialPosts.sort((a,b) => a.post_number - b.post_number);
         renderPosts(true);
-        if (jumpToPostNumber) {
-            setTimeout(() => document.getElementById(`post-${jumpToPostNumber}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
-        }
+        if (jumpToPostNumber) { setTimeout(() => document.getElementById(`post-${jumpToPostNumber}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100); }
     };
     
     // --- Post Rendering & Loading ---
     const fetchPostChunks = async (chunkNumbers) => {
         const chunksToFetch = chunkNumbers.filter(cn => !currentState.loadedChunks.has(cn));
         if (chunksToFetch.length === 0) return [];
-        const promises = chunksToFetch.map(i => {
-            currentState.loadedChunks.add(i);
-            return fetch(`/api/threads/${currentState.threadId}/posts?chunk=${i}`, { cache: 'no-cache' }).then(res => res.json());
-        });
+        const promises = chunksToFetch.map(i => { currentState.loadedChunks.add(i); return fetch(`/api/threads/${currentState.threadId}/posts?chunk=${i}`, { cache: 'no-cache' }).then(res => res.json()); });
         return (await Promise.all(promises)).flat();
     };
     
     const renderPosts = (clear = true) => {
         if(clear) postsContainer.innerHTML = '';
         const fragment = document.createDocumentFragment();
-        
         currentState.posts.forEach(post => {
             if (document.getElementById(`post-${post.post_number}`)) return;
             const div = document.createElement('div');
             div.className = 'post';
             div.id = `post-${post.post_number}`;
             const isBookmarked = BookmarkManager.isBookmarked(currentState.threadId, post.post_number);
+            if(isBookmarked) div.classList.add('bookmarked');
             const formattedDate = parseUTCDate(post.created_at)?.toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-            div.innerHTML = `<div class="post-header"><span><span class="post-number">${post.post_number}</span>: ${escapeHTML(post.author || '名無しさん')}<i class="bookmark-icon" title="栞の追加/削除">${isBookmarked ? '🔖' : '📎'}</i></span><span class="post-date">${formattedDate}</span></div><div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>`;
-            div.querySelector('.bookmark-icon').addEventListener('click', (e) => {
+            div.innerHTML = `<div class="post-header"><span class="post-header-main"><span class="post-number">${post.post_number}</span>: ${escapeHTML(post.author || '名無しさん')}<i class="bookmark-icon">${isBookmarked ? '🔖' : '📎'}</i></span><span class="post-date">${formattedDate}</span></div><div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>`;
+            div.querySelector('.post-header').addEventListener('click', (e) => {
                 e.stopPropagation();
                 const isNowBookmarked = BookmarkManager.toggle(currentState.threadId, currentState.threadInfo.title, post);
-                updateBookmarkIcon(post.post_number, isNowBookmarked);
-                // 栞モーダルが開いていたら、中身を再描画して即時反映
-                if (bookmarkModal.style.display === 'flex') {
-                    const currentTid = bookmarkViewContent.dataset.currentTid;
-                    prepareBookmarkView(currentTid === 'null' ? null : currentTid);
-                }
+                updateBookmarkStyle(post.post_number, isNowBookmarked);
+                if (bookmarkModal.style.display === 'flex') { const currentTid = bookmarkViewContent.dataset.currentTid; prepareBookmarkView(currentTid === 'null' ? null : currentTid); }
             });
             fragment.appendChild(div);
         });
-
         const firstPost = postsContainer.querySelector('.post');
-        if (firstPost && !clear) {
-            postsContainer.insertBefore(fragment, firstPost);
-        } else {
-            postsContainer.appendChild(fragment);
-        }
+        if (firstPost && !clear) { postsContainer.insertBefore(fragment, firstPost); } else { postsContainer.appendChild(fragment); }
         updateOlderPostsLoaderVisibility();
     };
 
     const updateOlderPostsLoaderVisibility = () => {
         const firstPostNum = currentState.posts[0]?.post_number;
         const loaderBtn = postsLoader.querySelector('.load-older-btn');
-        if (firstPostNum > 1) {
-            if (!loaderBtn) {
-                postsLoader.insertAdjacentHTML('afterbegin', `<button class="load-older-btn" onclick="loadOlderPosts(this)">前のレス${POSTS_PER_PAGE}件を表示</button>`);
-            }
-        } else {
-            if (loaderBtn) loaderBtn.remove();
-        }
+        if (firstPostNum > 1) { if (!loaderBtn) { postsLoader.insertAdjacentHTML('afterbegin', `<button class="load-older-btn" onclick="loadOlderPosts(this)">前のレス${POSTS_PER_PAGE}件を表示</button>`); } } else { if (loaderBtn) loaderBtn.remove(); }
     };
-
     window.loadOlderPosts = async (button) => {
         if (isLoadingPosts) return;
-        isLoadingPosts = true;
-        button.disabled = true;
-        button.textContent = '読み込み中...';
+        isLoadingPosts = true; button.disabled = true; button.textContent = '読み込み中...';
         try {
             const firstPostNum = currentState.posts[0].post_number;
             const currentChunk = Math.floor((firstPostNum - 1) / CHUNK_SIZE);
             const chunksNeeded = Math.ceil(POSTS_PER_PAGE / CHUNK_SIZE);
             const startChunk = Math.max(0, currentChunk - chunksNeeded);
             const chunksToFetch = Array.from({length: currentChunk - startChunk}, (_, i) => startChunk + i);
-            
             const olderPosts = await fetchPostChunks(chunksToFetch);
-            if(olderPosts.length > 0) {
-                const currentTopPost = postsContainer.querySelector('.post');
-                currentState.posts.unshift(...olderPosts);
-                currentState.posts.sort((a,b) => a.post_number - b.post_number);
-                renderPosts(true);
-                document.getElementById(currentTopPost.id)?.scrollIntoView();
-            }
-        } catch(error) { console.error(error); button.textContent = '読み込み失敗';
-        } finally { isLoadingPosts = false; }
+            if(olderPosts.length > 0) { const currentTopPost = postsContainer.querySelector('.post'); currentState.posts.unshift(...olderPosts); currentState.posts.sort((a,b) => a.post_number - b.post_number); renderPosts(true); document.getElementById(currentTopPost.id)?.scrollIntoView(); }
+        } catch(error) { console.error(error); button.textContent = '読み込み失敗'; } finally { isLoadingPosts = false; }
     };
-
     window.loadMorePosts = async (button, startChunk) => {
         if (isLoadingPosts) return;
-        isLoadingPosts = true;
-        button.disabled = true;
-        button.textContent = '読み込み中...';
+        isLoadingPosts = true; button.disabled = true; button.textContent = '読み込み中...';
         try {
             const chunksNeeded = Math.ceil(POSTS_PER_PAGE / CHUNK_SIZE);
             const endChunk = startChunk + chunksNeeded - 1;
             const chunksToFetch = Array.from({length: endChunk - startChunk + 1}, (_, i) => startChunk + i);
-            
             const morePosts = await fetchPostChunks(chunksToFetch);
-            if (morePosts.length > 0) {
-                currentState.posts.push(...morePosts);
-                currentState.posts.sort((a,b) => a.post_number - b.post_number);
-                renderPosts(true);
-            }
-            
+            if (morePosts.length > 0) { currentState.posts.push(...morePosts); currentState.posts.sort((a,b) => a.post_number - b.post_number); renderPosts(true); }
             const remainingPosts = currentState.threadInfo.post_count - ((endChunk + 1) * CHUNK_SIZE);
-            if (remainingPosts > 0) {
-                button.textContent = `続きから読む (${remainingPosts}レス)`;
-                button.onclick = () => loadMorePosts(button, endChunk + 1);
-                button.disabled = false;
-            } else {
-                button.remove();
-            }
-        } catch(error) { console.error(error); button.textContent = '読み込み失敗'; 
-        } finally { isLoadingPosts = false; }
+            if (remainingPosts > 0) { button.textContent = `続きから読む (${remainingPosts}レス)`; button.onclick = () => loadMorePosts(button, endChunk + 1); button.disabled = false; } else { button.remove(); }
+        } catch(error) { console.error(error); button.textContent = '読み込み失敗'; } finally { isLoadingPosts = false; }
     };
     
     // --- Bookmark Modal Logic ---
+    const updateBookmarkStyle = (postNumber, isBookmarked) => {
+        const postEl = document.getElementById(`post-${postNumber}`);
+        if(postEl) { postEl.querySelector('.bookmark-icon').textContent = isBookmarked ? '🔖' : '📎'; postEl.classList.toggle('bookmarked', isBookmarked); }
+    };
     window.openBookmarkModal = () => { prepareBookmarkView(null); bookmarkModal.style.display = 'flex'; };
     window.closeBookmarkModal = () => { bookmarkModal.style.display = 'none'; };
-    const updateBookmarkIcon = (postNumber, isBookmarked) => {
-        const postEl = document.getElementById(`post-${postNumber}`);
-        if(postEl) postEl.querySelector('.bookmark-icon').textContent = isBookmarked ? '🔖' : '📎';
-    };
     const prepareBookmarkView = (threadId) => {
-        bookmarkViewContent.innerHTML = '';
-        bookmarkViewContent.dataset.currentTid = threadId ?? 'null';
-        const allBookmarks = BookmarkManager.getAll();
+        bookmarkViewContent.innerHTML = ''; bookmarkViewContent.dataset.currentTid = threadId ?? 'null'; const allBookmarks = BookmarkManager.getAll();
         if (threadId) {
             const threadData = allBookmarks[threadId];
-            const title = document.createElement('h3');
-            title.textContent = `栞: ${escapeHTML(threadData?.title || '不明なスレッド')}`;
-            const backBtn = document.createElement('button');
-            backBtn.className = 'back-button';
-            backBtn.textContent = '« 栞一覧に戻る';
-            backBtn.onclick = () => prepareBookmarkView(null);
+            const title = document.createElement('h3'); title.textContent = `栞: ${escapeHTML(threadData?.title || '不明なスレッド')}`;
+            const backBtn = document.createElement('button'); backBtn.className = 'back-button'; backBtn.textContent = '« 栞一覧に戻る'; backBtn.onclick = () => prepareBookmarkView(null);
             bookmarkViewContent.append(backBtn, title);
-            if (threadData && Object.keys(threadData.bookmarks).length > 0) {
-                 Object.entries(threadData.bookmarks).sort((a,b) => parseInt(a[0]) - parseInt(b[0])).forEach(([postNumber, bookmark]) => {
-                    const item = document.createElement('div');
-                    item.className = 'bookmark-item';
-                    item.innerHTML = `<div style="flex-grow: 1;"><strong>レス ${postNumber}</strong><div class="post-body">${escapeHTML(bookmark.content)}</div></div><button class="bookmark-delete-btn">削除</button>`;
-                    item.querySelector('.bookmark-delete-btn').onclick = (e) => { e.stopPropagation(); BookmarkManager.removeSingle(threadId, postNumber); updateBookmarkIcon(postNumber, false); prepareBookmarkView(threadId); };
-                    item.onclick = () => jumpToBookmark(threadId, postNumber);
-                    bookmarkViewContent.appendChild(item);
-                });
-            } else { bookmarkViewContent.insertAdjacentHTML('beforeend', '<p>このスレッドの栞はありません。</p>'); }
+            if (threadData && Object.keys(threadData.bookmarks).length > 0) { Object.entries(threadData.bookmarks).sort((a,b) => parseInt(a[0]) - parseInt(b[0])).forEach(([postNumber, bookmark]) => { const item = document.createElement('div'); item.className = 'bookmark-item'; item.innerHTML = `<div style="flex-grow: 1;"><strong>レス ${postNumber}</strong><div class="post-body">${escapeHTML(bookmark.content)}</div></div><button class="bookmark-delete-btn">削除</button>`; item.querySelector('.bookmark-delete-btn').onclick = (e) => { e.stopPropagation(); BookmarkManager.removeSingle(threadId, postNumber); updateBookmarkStyle(postNumber, false); prepareBookmarkView(threadId); }; item.onclick = () => jumpToBookmark(threadId, postNumber); bookmarkViewContent.appendChild(item); }); } else { bookmarkViewContent.insertAdjacentHTML('beforeend', '<p>このスレッドの栞はありません。</p>'); }
         } else {
-            const title = document.createElement('h3');
-            title.textContent = '栞一覧';
-            bookmarkViewContent.appendChild(title);
-            if (Object.keys(allBookmarks).length > 0) {
-                Object.entries(allBookmarks).forEach(([tid, threadData]) => {
-                    const newestBookmark = Object.entries(threadData.bookmarks).sort((a,b) => parseInt(b[0]) - parseInt(a[0]))[0];
-                    if (!newestBookmark) return;
-                    const [postNumber, bookmark] = newestBookmark;
-                    const item = document.createElement('div');
-                    item.className = 'bookmark-item';
-                    item.innerHTML = `<div style="flex-grow: 1;"><div><strong>${escapeHTML(threadData.title)}</strong></div><div class="post-body">${escapeHTML(bookmark.content.substring(0, 50))}...</div><small>最新: レス ${postNumber} (${getRelativeTime(bookmark.timestamp)})</small></div><div style="text-align: right; display: flex; flex-direction: column; gap: 5px;"><button class="view-thread-bookmarks-btn">全件表示</button><button class="bookmark-delete-btn">全削除</button></div>`;
-                    item.querySelector('.view-thread-bookmarks-btn').onclick = (e) => { e.stopPropagation(); prepareBookmarkView(tid); };
-                    item.querySelector('.bookmark-delete-btn').onclick = (e) => { e.stopPropagation(); if (confirm(`「${threadData.title}」の栞をすべて削除しますか？`)) { BookmarkManager.removeForThread(tid); prepareBookmarkView(); if(currentState.threadId === tid) { currentState.posts.forEach(p => updateBookmarkIcon(p.post_number, false)); } } };
-                    item.onclick = () => jumpToBookmark(tid, postNumber);
-                    bookmarkViewContent.appendChild(item);
-                });
-            } else { bookmarkViewContent.insertAdjacentHTML('beforeend', '<p>栞はまだありません。</p>'); }
+            const title = document.createElement('h3'); title.textContent = '栞一覧'; bookmarkViewContent.appendChild(title);
+            if (Object.keys(allBookmarks).length > 0) { Object.entries(allBookmarks).forEach(([tid, threadData]) => { const newestBookmark = Object.entries(threadData.bookmarks).sort((a,b) => parseInt(b[0]) - parseInt(a[0]))[0]; if (!newestBookmark) return; const [postNumber, bookmark] = newestBookmark; const summaryContent = escapeHTML(bookmark.content.length > 10 ? bookmark.content.substring(0, 10) + '...' : bookmark.content); const item = document.createElement('div'); item.className = 'bookmark-item'; item.innerHTML = `<div style="flex-grow: 1;"><div><strong>${escapeHTML(threadData.title)}</strong></div><div class="post-summary">レス ${postNumber} ${summaryContent}</div></div><div style="text-align: right; display: flex; flex-direction: column; gap: 5px;"><button class="view-thread-bookmarks-btn">全件表示</button><button class="bookmark-delete-btn">全削除</button></div>`; item.querySelector('.view-thread-bookmarks-btn').onclick = (e) => { e.stopPropagation(); prepareBookmarkView(tid); }; item.querySelector('.bookmark-delete-btn').onclick = (e) => { e.stopPropagation(); if (confirm(`「${threadData.title}」の栞をすべて削除しますか？`)) { BookmarkManager.removeForThread(tid); prepareBookmarkView(); if(currentState.threadId === tid) { currentState.posts.forEach(p => updateBookmarkStyle(p.post_number, false)); } } }; item.onclick = () => jumpToBookmark(tid, postNumber); bookmarkViewContent.appendChild(item); }); } else { bookmarkViewContent.insertAdjacentHTML('beforeend', '<p>栞はまだありません。</p>'); }
         }
     };
     const jumpToBookmark = (threadId, postNumber) => {
+        const autoDelete = autoDeleteBookmarkCheckbox.checked;
+        if (autoDelete) { BookmarkManager.removeSingle(threadId, postNumber); if (currentState.threadId === threadId) { updateBookmarkStyle(postNumber, false); } }
         closeBookmarkModal();
         const currentRoute = parsePath();
         const genre = (currentRoute.view === 'threadContent' || currentRoute.view === 'threadList') ? currentRoute.genre : 'unknown';
@@ -559,34 +431,12 @@ document.addEventListener('DOMContentLoaded', () => {
     backToThreadListBtnHeader.onclick = () => navigate(`/${currentState.genre}`);
     window.addEventListener('popstate', router);
     document.getElementById('new-thread-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const idToken = window.authState.idToken;
-        const headers = { 'Content-Type': 'application/json' };
-        if (idToken) headers['Authorization'] = `Bearer ${idToken}`;
-        const form = e.target, btn = form.querySelector('button'), genre = form.elements['new-thread-genre'].value;
-        btn.disabled = true;
-        try {
-            const res = await fetch('/api/threads', { method: 'POST', headers, body: JSON.stringify({ genre, title: form.elements['new-thread-title'].value, author: form.elements['new-thread-author'].value, body: form.elements['new-thread-body'].value }) });
-            if (!res.ok) await handleApiError(res);
-            form.reset();
-            if (window.authState.user) form.elements['new-thread-author'].value = window.authState.user.displayName;
-            await prepareThreadListView(genre); 
-        } catch(err) { console.error(err); alert(err.message); } finally { btn.disabled = false; }
+        e.preventDefault(); const idToken = window.authState.idToken; const headers = { 'Content-Type': 'application/json' }; if (idToken) headers['Authorization'] = `Bearer ${idToken}`; const form = e.target, btn = form.querySelector('button'), genre = form.elements['new-thread-genre'].value; btn.disabled = true;
+        try { const res = await fetch('/api/threads', { method: 'POST', headers, body: JSON.stringify({ genre, title: form.elements['new-thread-title'].value, author: form.elements['new-thread-author'].value, body: form.elements['new-thread-body'].value }) }); if (!res.ok) await handleApiError(res); form.reset(); if (window.authState.user) form.elements['new-thread-author'].value = window.authState.user.displayName; await prepareThreadListView(genre); } catch(err) { console.error(err); alert(err.message); } finally { btn.disabled = false; }
     });
     document.getElementById('new-post-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const idToken = window.authState.idToken;
-        const headers = { 'Content-Type': 'application/json' };
-        if (idToken) headers['Authorization'] = `Bearer ${idToken}`;
-        const form = e.target, btn = form.querySelector('button'), threadId = form.elements['current-thread-id'].value;
-        btn.disabled = true;
-        try {
-            const res = await fetch(`/api/threads/${threadId}/posts`, { method: 'POST', headers, body: JSON.stringify({ author: form.elements['new-post-author'].value, body: form.elements['new-post-body'].value }) });
-            if (!res.ok) await handleApiError(res);
-            form.reset();
-            if (window.authState.user) form.elements['new-post-author'].value = window.authState.user.displayName;
-            await prepareThreadContentView(threadId); // 再読み込みして最新状態を表示
-        } catch(err) { console.error(err); alert(err.message); } finally { btn.disabled = false; }
+        e.preventDefault(); const idToken = window.authState.idToken; const headers = { 'Content-Type': 'application/json' }; if (idToken) headers['Authorization'] = `Bearer ${idToken}`; const form = e.target, btn = form.querySelector('button'), threadId = form.elements['current-thread-id'].value; btn.disabled = true;
+        try { const res = await fetch(`/api/threads/${threadId}/posts`, { method: 'POST', headers, body: JSON.stringify({ author: form.elements['new-post-author'].value, body: form.elements['new-post-body'].value }) }); if (!res.ok) await handleApiError(res); form.reset(); if (window.authState.user) form.elements['new-post-author'].value = window.authState.user.displayName; await prepareThreadContentView(threadId); } catch(err) { console.error(err); alert(err.message); } finally { btn.disabled = false; }
     });
 
     // --- Initial Load ---
