@@ -1,5 +1,3 @@
-// functions/api/[[path]].ts
-
 // 1. 型定義
 // -----------------------------------------------------------------------------
 interface Env {
@@ -8,7 +6,7 @@ interface Env {
 }
 
 interface Thread {
-  id: number;
+  id: string;
   title: string;
   genre: string;
   post_count: number;
@@ -17,7 +15,7 @@ interface Thread {
 }
 interface Post {
   id: number;
-  thread_id: number;
+  thread_id: string;
   post_number: number;
   author: string;
   body: string;
@@ -58,14 +56,14 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         return await getGenres(context);
       }
       if (path.startsWith('/api/threads')) { // startsWithで末尾スラッシュに対応
-        const infoMatch = path.match(/^\/api\/threads\/(\d+)\/info/);
+        const infoMatch = path.match(/^\/api\/threads\/([^/]+)\/info/);
         if (infoMatch) {
-            const threadId = parseInt(infoMatch[1], 10);
+            const threadId = infoMatch[1];
             return await getThreadInfo(context, threadId);
         }
-        const postsMatch = path.match(/^\/api\/threads\/(\d+)\/posts/);
+        const postsMatch = path.match(/^\/api\/threads\/([^/]+)\/posts/);
         if (postsMatch) {
-            const threadId = parseInt(postsMatch[1], 10);
+            const threadId = postsMatch[1];
             return await getPostsForThread(context, threadId);
         }
         // 他にマッチしない場合はスレッド一覧
@@ -78,9 +76,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const body = await request.json<any>();
 
       if (path.startsWith('/api/threads')) { // startsWithで末尾スラッシュに対応
-          const postsMatch = path.match(/^\/api\/threads\/(\d+)\/posts/);
+          const postsMatch = path.match(/^\/api\/threads\/([^/]+)\/posts/);
           if (postsMatch) {
-            const threadId = parseInt(postsMatch[1], 10);
+            const threadId = postsMatch[1];
             return await createPost(context, threadId, body);
           }
           // 他にマッチしない場合はスレッド作成
@@ -110,25 +108,13 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 // -----------------------------------------------------------------------------
 
 async function getGenres(context: EventContext<Env, any, any>): Promise<Response> {
-    const { request, env, waitUntil } = context;
-    const normalizedUrl = normalizeUrl(request.url);
-
-    const cache = caches.default;
-    const cacheKey = new Request(normalizedUrl.toString(), request);
-
-    const cachedResponse = await cache.match(cacheKey);
-    if (cachedResponse) return cachedResponse;
-
+    const { env } = context;
     const { results } = await env.MY_D1_DATABASE2.prepare(
         "SELECT DISTINCT genre FROM threads_meta WHERE genre IS NOT NULL"
     ).all<{ genre: string }>();
-
-    const response = new Response(JSON.stringify(results ?? []), {
+    return new Response(JSON.stringify(results ?? []), {
         headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${THREAD_LIST_CACHE_TTL}` }
     });
-    
-    waitUntil(cache.put(cacheKey, response.clone()));
-    return response;
 }
 
 async function getThreads(context: EventContext<Env, any, any>): Promise<Response> {
@@ -162,15 +148,8 @@ async function getThreads(context: EventContext<Env, any, any>): Promise<Respons
   return response;
 }
 
-async function getThreadInfo(context: EventContext<Env, any, any>, threadId: number): Promise<Response> {
-    const { request, env, waitUntil } = context;
-    const normalizedUrl = normalizeUrl(request.url);
-
-    const cache = caches.default;
-    const cacheKey = new Request(normalizedUrl.toString(), request);
-    const cachedResponse = await cache.match(cacheKey);
-    if (cachedResponse) return cachedResponse;
-
+async function getThreadInfo(context: EventContext<Env, any, any>, threadId: string): Promise<Response> {
+    const { env } = context;
     const threadInfo = await env.MY_D1_DATABASE2.prepare(
         "SELECT id, title, genre, post_count FROM threads_meta WHERE id = ?"
     ).bind(threadId).first<Thread>();
@@ -178,13 +157,7 @@ async function getThreadInfo(context: EventContext<Env, any, any>, threadId: num
     if (!threadInfo) {
       return new Response(JSON.stringify({ error: "Thread not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
     }
-
-    const response = new Response(JSON.stringify(threadInfo), {
-        headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${D1_CACHE_TTL}` }
-    });
-    
-    waitUntil(cache.put(cacheKey, response.clone()));
-    return response;
+    return new Response(JSON.stringify(threadInfo), { headers: { "Content-Type": "application/json" } });
 }
 
 async function createThread(context: EventContext<Env, any, any>, body: { genre: string; title: string; author: string; body: string }): Promise<Response> {
@@ -192,9 +165,10 @@ async function createThread(context: EventContext<Env, any, any>, body: { genre:
   const { genre, title, author, body: postBody } = body;
   if (!genre || !title || !postBody) return new Response(JSON.stringify({ error: "Genre, title and body are required." }), { status: 400 });
 
-  const threadResult = await env.MY_D1_DATABASE2.prepare("INSERT INTO threads (title) VALUES (?) RETURNING id").bind(title).first<{ id: number }>();
-  const newThreadId = threadResult?.id;
-  if (!newThreadId) throw new Error("Failed to create a new thread.");
+  const newThreadId = crypto.randomUUID();
+
+  // 関連テーブルで使うため、まずthreadsテーブルに挿入（スキーマでidがTEXT PRIMARY KEYになっている必要があります）
+  await env.MY_D1_DATABASE2.prepare("INSERT INTO threads (id, title) VALUES (?, ?)").bind(newThreadId, title).run();
   
   await env.MY_D1_DATABASE2.batch([
     env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body) VALUES (?, 1, ?, ?)")
@@ -208,18 +182,16 @@ async function createThread(context: EventContext<Env, any, any>, body: { genre:
   
   const genreThreadsCacheUrl = normalizeUrl(`${url.protocol}//${url.host}/api/threads?genre=${genre}`);
   const allThreadsCacheUrl = normalizeUrl(`${url.protocol}//${url.host}/api/threads`);
-  const genresCacheUrl = normalizeUrl(`${url.protocol}//${url.host}/api/genres`);
   
   waitUntil(Promise.all([
       cache.delete(new Request(genreThreadsCacheUrl.toString())),
-      cache.delete(new Request(allThreadsCacheUrl.toString())),
-      cache.delete(new Request(genresCacheUrl.toString()))
+      cache.delete(new Request(allThreadsCacheUrl.toString()))
   ]));
 
   return new Response(JSON.stringify({ id: newThreadId }), { status: 201, headers: { "Content-Type": "application/json" } });
 }
 
-async function getPostsForThread(context: EventContext<Env, any, any>, threadId: number): Promise<Response> {
+async function getPostsForThread(context: EventContext<Env, any, any>, threadId: string): Promise<Response> {
   const { request, env, waitUntil } = context;
   const normalizedUrl = normalizeUrl(request.url);
   const chunkIndex = parseInt(normalizedUrl.searchParams.get('chunk') || '0', 10);
@@ -262,7 +234,7 @@ async function getPostsForThread(context: EventContext<Env, any, any>, threadId:
   return response;
 }
 
-async function createPost(context: EventContext<Env, any, any>, threadId: number, body: { author: string; body: string }): Promise<Response> {
+async function createPost(context: EventContext<Env, any, any>, threadId: string, body: { author: string; body: string }): Promise<Response> {
   const { request, env, waitUntil } = context;
   const { author, body: postBody } = body;
   if (!postBody) return new Response(JSON.stringify({ error: "Body is required." }), { status: 400 });
@@ -289,12 +261,9 @@ async function createPost(context: EventContext<Env, any, any>, threadId: number
   const url = new URL(request.url);
   const genreThreadsCacheUrl = normalizeUrl(`${url.protocol}//${url.host}/api/threads?genre=${threadInfo.genre}`);
   const allThreadsCacheUrl = normalizeUrl(`${url.protocol}//${url.host}/api/threads`);
-  const threadInfoCacheUrl = normalizeUrl(`${url.protocol}//${url.host}/api/threads/${threadId}/info`);
-
    waitUntil(Promise.all([
       caches.default.delete(new Request(genreThreadsCacheUrl.toString())),
-      caches.default.delete(new Request(allThreadsCacheUrl.toString())),
-      caches.default.delete(new Request(threadInfoCacheUrl.toString()))
+      caches.default.delete(new Request(allThreadsCacheUrl.toString()))
   ]));
   
   const d1Offset = (latestChunkIndex - threadInfo.archived_chunk_count) * CHUNK_SIZE;
@@ -307,7 +276,7 @@ async function createPost(context: EventContext<Env, any, any>, threadId: number
   });
 }
 
-async function archiveChunk(context: EventContext<Env, any, any>, threadId: number, chunkToArchive: number) {
+async function archiveChunk(context: EventContext<Env, any, any>, threadId: string, chunkToArchive: number) {
     const { env, request } = context;
     console.log(`Archiving chunk ${chunkToArchive} for thread ${threadId}`);
     try {
@@ -350,7 +319,7 @@ async function archiveChunk(context: EventContext<Env, any, any>, threadId: numb
     }
 }
 
-async function invalidateChunkCache(context: EventContext<Env, any, any>, threadId: number, chunkIndex: number) {
+async function invalidateChunkCache(context: EventContext<Env, any, any>, threadId: string, chunkIndex: number) {
     const { request } = context;
     
     const url = new URL(request.url);
