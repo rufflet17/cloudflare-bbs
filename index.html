@@ -354,7 +354,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const prepareThreadContentView = async (threadId) => {
-        const infoRes = await fetch(`/api/threads/${threadId}/info`);
+        // [修正点] fetchに { cache: 'no-cache' } を追加し、ブラウザキャッシュをバイパスさせる
+        const infoRes = await fetch(`/api/threads/${threadId}/info`, { cache: 'no-cache' });
         if (!infoRes.ok) await handleApiError(infoRes);
         const threadInfo = await infoRes.json();
         currentState.threadInfo = threadInfo;
@@ -363,7 +364,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('current-thread-id').value = threadInfo.id;
         
         const initialChunk = Math.floor((threadInfo.post_count - 1) / CHUNK_SIZE);
-        const postsRes = await fetch(`/api/threads/${threadId}/posts?chunk=${initialChunk}`);
+        // [修正点] fetchに { cache: 'no-cache' } を追加し、ブラウザキャッシュをバイパスさせる
+        const postsRes = await fetch(`/api/threads/${threadId}/posts?chunk=${initialChunk}`, { cache: 'no-cache' });
         if (!postsRes.ok) await handleApiError(postsRes);
         
         const posts = await postsRes.json();
@@ -410,8 +412,9 @@ document.addEventListener('DOMContentLoaded', () => {
         button.textContent = '読み込んでいます...';
             
         try {
+            // [修正点] fetchに { cache: 'no-cache' } を追加し、ブラウザキャッシュをバイパスさせる
             const promises = Array.from({ length: totalChunks }, (_, i) => 
-                fetch(`/api/threads/${threadId}/posts?chunk=${i}`).then(res => res.json())
+                fetch(`/api/threads/${threadId}/posts?chunk=${i}`, { cache: 'no-cache' }).then(res => res.json())
             );
             const chunkResults = await Promise.all(promises);
             renderPosts(chunkResults.flat(), true); 
