@@ -142,10 +142,9 @@
     .post-header { font-size: 0.9em; color: var(--post-name-color); font-weight: bold; }
     .post-header .post-date { color: var(--post-meta-color); font-weight: normal; margin-left: 10px; }
     .post-body { margin-left: 1em; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
-    .post-number { cursor: pointer; text-decoration: underline; }
+    .post-number { text-decoration: underline; }
     .bookmark-icon { margin-left: 5px; cursor: pointer; color: var(--accent-color); font-style: normal; }
 
-    
     body[data-theme="modern"] .post {
       border-left: none;
       padding: 15px;
@@ -158,19 +157,42 @@
     }
     
     .back-button { margin-bottom: 15px; }
-    #older-posts-loader { text-align: center; margin-bottom: 15px; }
-
-    .view { display: none; } /* Helper class for views */
-
-    .bookmark-controls { display: flex; justify-content: space-between; padding: 10px 0; border-top: 1px solid var(--border-color); margin-top: 15px; }
-    .bookmark-item { border-bottom: 1px dotted var(--border-color); padding: 10px; }
-    .bookmark-item .post-body { margin-left: 0; font-size: 0.9em; max-height: 3.2em; overflow: hidden; }
+    #posts-loader { text-align: center; margin-bottom: 15px; }
+    .view { display: none; }
+    .page-controls { display: flex; justify-content: space-between; padding: 10px 0; border-top: 1px solid var(--border-color); margin-top: 15px; }
+    
+    /* --- Bookmark Window Styles --- */
+    #bookmark-window {
+        position: fixed;
+        z-index: 1001;
+        background-color: var(--main-bg-color);
+        border: 1px solid var(--border-color);
+        border-radius: var(--card-radius);
+        box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        width: 350px;
+        height: 450px;
+        display: flex;
+        flex-direction: column;
+    }
+    #bookmark-header {
+        padding: 10px;
+        cursor: move;
+        background-color: var(--accent-color);
+        color: white;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-top-left-radius: var(--card-radius);
+        border-top-right-radius: var(--card-radius);
+    }
+    #bookmark-header h3 { border: none; padding: 0; margin: 0; font-size: 1em; }
+    #bookmark-close-btn { background: none; border: none; color: white; font-size: 1.2em; cursor: pointer; padding:0; line-height:1; }
+    #bookmark-view-content { padding: 10px; overflow-y: auto; flex-grow: 1; }
+    .bookmark-item { border-bottom: 1px dotted var(--border-color); padding: 10px; cursor: pointer; }
+    .bookmark-item:hover { background-color: var(--thread-hover-bg); }
+    .bookmark-item .post-body { margin-left: 0; font-size: 0.9em; max-height: 3.2em; overflow: hidden; color: var(--post-meta-color); }
     .bookmark-delete-btn { font-size: 0.8em; padding: 2px 6px; background-color: #dc3545; }
-
-    /* --- Modal Styles --- */
-    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; }
-    .modal-content { background-color: var(--main-bg-color); padding: 20px; border-radius: var(--card-radius); width: 90%; max-width: 700px; max-height: 80vh; overflow-y: auto; position: relative; }
-    .modal-close { position: absolute; top: 10px; right: 10px; font-size: 1.5em; line-height: 1; background: none; border: none; color: var(--text-color); cursor: pointer; }
   </style>
 </head>
 <body data-theme="classic">
@@ -188,6 +210,9 @@
     <div class="theme-switcher">
         <button data-theme="classic">クラシック</button>
         <button data-theme="modern">モダン</button>
+    </div>
+    <div class="page-controls" style="border-top: none; padding-top: 0;">
+        <button id="open-bookmarks-main" onclick="openBookmarkWindow()">栞を開く</button>
     </div>
 
     <!-- ホーム（ジャンル一覧）ビュー -->
@@ -214,12 +239,9 @@
     
     <!-- スレッド内容ビュー -->
     <div id="thread-content-view" class="view">
-      <div class="bookmark-controls">
-        <button id="open-bookmarks-top" onclick="openBookmarkModal()">栞を開く</button>
-      </div>
       <button class="back-button" id="back-to-thread-list-btn">&laquo; スレッド一覧に戻る</button>
       <h2 id="thread-title"></h2>
-      <div id="older-posts-loader"></div>
+      <div id="posts-loader"></div>
       <div id="posts-container"></div>
       <hr>
       <h3>レスを書き込む</h3>
@@ -229,22 +251,19 @@
         <textarea id="new-post-body" placeholder="書き込み内容" rows="4" required></textarea>
         <button type="submit">書き込む</button>
       </form>
-      <div class="bookmark-controls">
-        <button id="open-bookmarks-bottom" onclick="openBookmarkModal()">栞を開く</button>
-      </div>
     </div>
   </main>
 
-  <!-- 栞モーダル -->
-  <div id="bookmark-modal" class="modal-overlay" style="display: none;">
-    <div class="modal-content">
-      <button class="modal-close" onclick="closeBookmarkModal()">×</button>
-      <div id="bookmark-view-content"></div>
+  <!-- 栞ウィンドウ -->
+  <div id="bookmark-window" style="display: none;">
+    <div id="bookmark-header">
+      <h3 id="bookmark-window-title">栞</h3>
+      <button id="bookmark-close-btn" onclick="closeBookmarkWindow()">×</button>
     </div>
+    <div id="bookmark-view-content"></div>
   </div>
 
 <script type="module">
-  // Firebase認証スクリプト (変更なし)
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
   const firebaseConfig = {"apiKey":"AIzaSyDSfTZRS0Smjnxns4hEzDibrY9dDIEMpgQ","authDomain":"thread-fb369.firebaseapp.com","projectId":"thread-fb369","storageBucket":"thread-fb369.firebasestorage.app","messagingSenderId":"259512543030","appId":"1:259512543030:web:cb6674ae37384371c0b597","measurementId":"G-2EWG4EWCQR"};
@@ -282,21 +301,20 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    // --- 設定値 ---
     const CHUNK_SIZE = 50;
+    const POSTS_PER_PAGE = 200;
+
     let currentState = {};
     let isLoadingPosts = false;
 
     // --- DOM Elements ---
-    const views = {
-        home: document.getElementById('home-view'),
-        threadList: document.getElementById('thread-list-view'),
-        threadContent: document.getElementById('thread-content-view'),
-    };
+    const views = { home: document.getElementById('home-view'), threadList: document.getElementById('thread-list-view'), threadContent: document.getElementById('thread-content-view') };
     const genreListContainer = document.getElementById('genre-list');
     const threadListContainer = document.getElementById('thread-list');
     const postsContainer = document.getElementById('posts-container');
-    const olderPostsLoader = document.getElementById('older-posts-loader');
-    const bookmarkModal = document.getElementById('bookmark-modal');
+    const postsLoader = document.getElementById('posts-loader');
+    const bookmarkWindow = document.getElementById('bookmark-window');
     const bookmarkViewContent = document.getElementById('bookmark-view-content');
     
     // --- Bookmark Manager ---
@@ -428,65 +446,93 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     const prepareThreadContentView = async (threadId, jumpToPostNumber = null) => {
         postsContainer.innerHTML = '読み込み中...';
+        postsLoader.innerHTML = '';
         const infoRes = await fetch(`/api/threads/${threadId}/info`, { cache: 'no-cache' });
         if (!infoRes.ok) await handleApiError(infoRes);
         const threadInfo = await infoRes.json();
-        currentState.threadInfo = threadInfo;
+        currentState = { ...currentState, threadInfo, threadId, posts: [], loadedChunks: new Set() };
         
         document.getElementById('thread-title').textContent = threadInfo.title;
         document.getElementById('current-thread-id').value = threadInfo.id;
         
-        let posts = [];
+        let initialPosts = [];
         if (jumpToPostNumber) {
             const targetChunk = Math.floor((jumpToPostNumber - 1) / CHUNK_SIZE);
-            const latestChunk = Math.floor((threadInfo.post_count - 1) / CHUNK_SIZE);
-            const chunksToFetch = Array.from({length: latestChunk - targetChunk + 1}, (_, i) => targetChunk + i);
-            const promises = chunksToFetch.map(i => fetch(`/api/threads/${threadId}/posts?chunk=${i}`, { cache: 'no-cache' }).then(res => res.json()));
-            posts = (await Promise.all(promises)).flat();
-            renderPosts(posts, true);
-            setTimeout(() => document.getElementById(`post-${jumpToPostNumber}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+            const chunksNeeded = Math.ceil(POSTS_PER_PAGE / CHUNK_SIZE);
+            const endChunk = targetChunk + chunksNeeded - 1;
+            const chunksToFetch = Array.from({length: endChunk - targetChunk + 1}, (_, i) => targetChunk + i);
+            
+            initialPosts = await fetchPostChunks(chunksToFetch);
+            
+            const remainingPosts = threadInfo.post_count - ((endChunk + 1) * CHUNK_SIZE);
+            if (remainingPosts > 0) {
+                postsLoader.insertAdjacentHTML('beforeend', `<button onclick="loadMorePosts(this, ${endChunk + 1})">続きから読む (${remainingPosts}レス)</button>`);
+            }
         } else {
             const latestChunk = Math.floor((threadInfo.post_count - 1) / CHUNK_SIZE);
-            const chunksToFetch = latestChunk > 0 ? [latestChunk - 1, latestChunk] : [latestChunk];
-            const promises = chunksToFetch.map(i => fetch(`/api/threads/${threadId}/posts?chunk=${i}`, { cache: 'no-cache' }).then(res => res.json()));
-            posts = (await Promise.all(promises)).flat();
-            const latest50Posts = posts.sort((a,b) => a.post_number - b.post_number).slice(-50);
-            renderPosts(latest50Posts, true);
+            const chunksNeeded = Math.ceil(POSTS_PER_PAGE / CHUNK_SIZE);
+            const startChunk = Math.max(0, latestChunk - chunksNeeded + 1);
+            const chunksToFetch = Array.from({length: latestChunk - startChunk + 1}, (_, i) => startChunk + i);
+            initialPosts = await fetchPostChunks(chunksToFetch);
         }
         
-        currentState.loadedChunks = new Set(posts.map(p => Math.floor((p.post_number-1)/CHUNK_SIZE)));
-        updateOlderPostsLoaderVisibility();
+        currentState.posts = initialPosts.sort((a,b) => a.post_number - b.post_number);
+        renderPosts(true);
+        if (jumpToPostNumber) {
+            setTimeout(() => document.getElementById(`post-${jumpToPostNumber}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+        }
     };
     
     // --- Post Rendering & Loading ---
-    const renderPosts = (posts, clear = true, prepend = false) => {
+    const fetchPostChunks = async (chunkNumbers) => {
+        const chunksToFetch = chunkNumbers.filter(cn => !currentState.loadedChunks.has(cn));
+        if (chunksToFetch.length === 0) return [];
+        const promises = chunksToFetch.map(i => {
+            currentState.loadedChunks.add(i);
+            return fetch(`/api/threads/${currentState.threadId}/posts?chunk=${i}`, { cache: 'no-cache' }).then(res => res.json());
+        });
+        return (await Promise.all(promises)).flat();
+    };
+    
+    const renderPosts = (clear = true) => {
         if(clear) postsContainer.innerHTML = '';
-        const sortedPosts = posts.sort((a, b) => a.post_number - b.post_number);
         const fragment = document.createDocumentFragment();
-        sortedPosts.forEach(post => {
+        
+        currentState.posts.forEach(post => {
+            if (document.getElementById(`post-${post.post_number}`)) return; // すでに表示されていればスキップ
             const div = document.createElement('div');
             div.className = 'post';
             div.id = `post-${post.post_number}`;
             const isBookmarked = BookmarkManager.isBookmarked(currentState.threadId, post.post_number);
             const formattedDate = parseUTCDate(post.created_at)?.toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-            div.innerHTML = `<div class="post-header"><span><span class="post-number">${post.post_number}</span>: ${escapeHTML(post.author || '名無しさん')}<i class="bookmark-icon">${isBookmarked ? '🔖' : '📎'}</i></span><span class="post-date">${formattedDate}</span></div><div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>`;
-            div.querySelector('.post-number, .bookmark-icon').addEventListener('click', () => {
+            div.innerHTML = `<div class="post-header"><span><span class="post-number">${post.post_number}</span>: ${escapeHTML(post.author || '名無しさん')}<i class="bookmark-icon" title="栞の追加/削除">${isBookmarked ? '🔖' : '📎'}</i></span><span class="post-date">${formattedDate}</span></div><div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>`;
+            div.querySelector('.bookmark-icon').addEventListener('click', (e) => {
+                e.stopPropagation();
                 const isNowBookmarked = BookmarkManager.toggle(currentState.threadId, currentState.threadInfo.title, post);
-                div.querySelector('.bookmark-icon').textContent = isNowBookmarked ? '🔖' : '📎';
+                updateBookmarkIcon(post.post_number, isNowBookmarked);
             });
             fragment.appendChild(div);
         });
-        if (prepend) postsContainer.prepend(fragment);
-        else postsContainer.appendChild(fragment);
+
+        const firstPost = postsContainer.querySelector('.post');
+        if (firstPost) {
+            postsContainer.insertBefore(fragment, firstPost);
+        } else {
+            postsContainer.appendChild(fragment);
+        }
+
+        updateOlderPostsLoaderVisibility();
     };
 
     const updateOlderPostsLoaderVisibility = () => {
-        olderPostsLoader.innerHTML = '';
-        const firstPostEl = postsContainer.querySelector('.post');
-        if (!firstPostEl) return;
-        const firstPostNum = parseInt(firstPostEl.id.replace('post-', ''), 10);
+        const firstPostNum = currentState.posts[0]?.post_number;
+        const loaderBtn = postsLoader.querySelector('.load-older-btn');
         if (firstPostNum > 1) {
-            olderPostsLoader.innerHTML = `<button onclick="loadOlderPosts(this)">前のレスを表示</button>`;
+            if (!loaderBtn) {
+                postsLoader.insertAdjacentHTML('afterbegin', `<button class="load-older-btn" onclick="loadOlderPosts(this)">前のレス${POSTS_PER_PAGE}件を表示</button>`);
+            }
+        } else {
+            if (loaderBtn) loaderBtn.remove();
         }
     };
 
@@ -496,37 +542,64 @@ document.addEventListener('DOMContentLoaded', () => {
         button.disabled = true;
         button.textContent = '読み込み中...';
         try {
-            const firstPostEl = postsContainer.querySelector('.post');
-            const firstPostNum = parseInt(firstPostEl.id.replace('post-', ''), 10);
-            const chunkToLoad = Math.floor((firstPostNum - 2) / CHUNK_SIZE);
-            if (chunkToLoad < 0 || currentState.loadedChunks.has(chunkToLoad)) return;
-
-            const res = await fetch(`/api/threads/${currentState.threadId}/posts?chunk=${chunkToLoad}`, { cache: 'no-cache' });
-            if (!res.ok) throw new Error('Failed to load older posts');
-            const olderPosts = await res.json();
+            const firstPostNum = currentState.posts[0].post_number;
+            const currentChunk = Math.floor((firstPostNum - 1) / CHUNK_SIZE);
+            const chunksNeeded = Math.ceil(POSTS_PER_PAGE / CHUNK_SIZE);
+            const startChunk = Math.max(0, currentChunk - chunksNeeded);
+            const chunksToFetch = Array.from({length: currentChunk - startChunk}, (_, i) => startChunk + i);
             
+            const olderPosts = await fetchPostChunks(chunksToFetch);
             if(olderPosts.length > 0) {
-                renderPosts(olderPosts, false, true);
-                currentState.loadedChunks.add(chunkToLoad);
+                currentState.posts.unshift(...olderPosts);
+                currentState.posts.sort((a,b) => a.post_number - b.post_number);
+                renderPosts(true);
             }
-        } catch(error) {
-            console.error(error);
-            button.textContent = '読み込み失敗';
-        } finally {
-            isLoadingPosts = false;
-            updateOlderPostsLoaderVisibility();
-        }
+        } catch(error) { console.error(error); button.textContent = '読み込み失敗';
+        } finally { isLoadingPosts = false; }
+    };
+
+    window.loadMorePosts = async (button, startChunk) => {
+        if (isLoadingPosts) return;
+        isLoadingPosts = true;
+        button.disabled = true;
+        button.textContent = '読み込み中...';
+        try {
+            const chunksNeeded = Math.ceil(POSTS_PER_PAGE / CHUNK_SIZE);
+            const endChunk = startChunk + chunksNeeded - 1;
+            const chunksToFetch = Array.from({length: endChunk - startChunk + 1}, (_, i) => startChunk + i);
+            
+            const morePosts = await fetchPostChunks(chunksToFetch);
+            if (morePosts.length > 0) {
+                currentState.posts.push(...morePosts);
+                currentState.posts.sort((a,b) => a.post_number - b.post_number);
+                renderPosts(true);
+            }
+            
+            const remainingPosts = currentState.threadInfo.post_count - ((endChunk + 1) * CHUNK_SIZE);
+            if (remainingPosts > 0) {
+                button.textContent = `続きから読む (${remainingPosts}レス)`;
+                button.onclick = () => loadMorePosts(button, endChunk + 1);
+                button.disabled = false;
+            } else {
+                button.remove();
+            }
+        } catch(error) { console.error(error); button.textContent = '読み込み失敗'; 
+        } finally { isLoadingPosts = false; }
     };
     
-    // --- Bookmark Modal Logic ---
-    window.openBookmarkModal = (threadId = null) => { prepareBookmarkView(threadId); bookmarkModal.style.display = 'flex'; };
-    window.closeBookmarkModal = () => { bookmarkModal.style.display = 'none'; };
+    // --- Bookmark Window Logic ---
+    window.openBookmarkWindow = () => { prepareBookmarkView(null); bookmarkWindow.style.display = 'flex'; };
+    window.closeBookmarkWindow = () => { bookmarkWindow.style.display = 'none'; };
+    const updateBookmarkIcon = (postNumber, isBookmarked) => {
+        const postEl = document.getElementById(`post-${postNumber}`);
+        if(postEl) postEl.querySelector('.bookmark-icon').textContent = isBookmarked ? '🔖' : '📎';
+    };
     const prepareBookmarkView = (threadId) => {
         bookmarkViewContent.innerHTML = '';
         const allBookmarks = BookmarkManager.getAll();
         if (threadId) {
             const threadData = allBookmarks[threadId];
-            const title = document.createElement('h2');
+            const title = document.createElement('h3');
             title.textContent = `栞: ${escapeHTML(threadData?.title || '不明なスレッド')}`;
             const backBtn = document.createElement('button');
             backBtn.className = 'back-button';
@@ -534,29 +607,29 @@ document.addEventListener('DOMContentLoaded', () => {
             backBtn.onclick = () => prepareBookmarkView(null);
             bookmarkViewContent.append(backBtn, title);
             if (threadData && Object.keys(threadData.bookmarks).length > 0) {
-                 Object.entries(threadData.bookmarks).sort((a,b) => a[0] - b[0]).forEach(([postNumber, bookmark]) => {
+                 Object.entries(threadData.bookmarks).sort((a,b) => parseInt(a[0]) - parseInt(b[0])).forEach(([postNumber, bookmark]) => {
                     const item = document.createElement('div');
-                    item.className = 'bookmark-item list-item';
+                    item.className = 'bookmark-item';
                     item.innerHTML = `<div style="flex-grow: 1;"><strong>レス ${postNumber}</strong><div class="post-body">${escapeHTML(bookmark.content)}</div></div><button class="bookmark-delete-btn">削除</button>`;
-                    item.querySelector('.bookmark-delete-btn').onclick = (e) => { e.stopPropagation(); BookmarkManager.removeSingle(threadId, postNumber); prepareBookmarkView(threadId); };
+                    item.querySelector('.bookmark-delete-btn').onclick = (e) => { e.stopPropagation(); BookmarkManager.removeSingle(threadId, postNumber); updateBookmarkIcon(postNumber, false); prepareBookmarkView(threadId); };
                     item.onclick = () => jumpToBookmark(threadId, postNumber);
                     bookmarkViewContent.appendChild(item);
                 });
             } else { bookmarkViewContent.insertAdjacentHTML('beforeend', '<p>このスレッドの栞はありません。</p>'); }
         } else {
-            const title = document.createElement('h2');
-            title.textContent = '栞一覧';
+            const title = document.createElement('h3');
+            title.textContent = '栞トップ';
             bookmarkViewContent.appendChild(title);
             if (Object.keys(allBookmarks).length > 0) {
                 Object.entries(allBookmarks).forEach(([tid, threadData]) => {
-                    const newestBookmark = Object.entries(threadData.bookmarks).sort((a,b) => b[0] - a[0])[0];
+                    const newestBookmark = Object.entries(threadData.bookmarks).sort((a,b) => parseInt(b[0]) - parseInt(a[0]))[0];
                     if (!newestBookmark) return;
                     const [postNumber, bookmark] = newestBookmark;
                     const item = document.createElement('div');
-                    item.className = 'bookmark-item list-item';
-                    item.innerHTML = `<div style="flex-grow: 1;"><div><strong>${escapeHTML(threadData.title)}</strong></div><small>レス ${postNumber} (${getRelativeTime(bookmark.timestamp)})</small></div><div style="text-align: right;"><button class="view-thread-bookmarks-btn">全件表示</button><button class="bookmark-delete-btn">全削除</button></div>`;
+                    item.className = 'bookmark-item';
+                    item.innerHTML = `<div style="flex-grow: 1;"><div><strong>${escapeHTML(threadData.title)}</strong></div><div class="post-body">${escapeHTML(bookmark.content.substring(0, 10))}...</div><small>レス ${postNumber} (${getRelativeTime(bookmark.timestamp)})</small></div><div style="text-align: right;"><button class="view-thread-bookmarks-btn">全件</button><button class="bookmark-delete-btn">全削除</button></div>`;
                     item.querySelector('.view-thread-bookmarks-btn').onclick = (e) => { e.stopPropagation(); prepareBookmarkView(tid); };
-                    item.querySelector('.bookmark-delete-btn').onclick = (e) => { e.stopPropagation(); if (confirm(`「${threadData.title}」の栞をすべて削除しますか？`)) { BookmarkManager.removeForThread(tid); prepareBookmarkView(); } };
+                    item.querySelector('.bookmark-delete-btn').onclick = (e) => { e.stopPropagation(); if (confirm(`「${threadData.title}」の栞をすべて削除しますか？`)) { BookmarkManager.removeForThread(tid); prepareBookmarkView(); if(currentState.threadId === tid) { currentState.posts.forEach(p => updateBookmarkIcon(p.post_number, false)); } } };
                     item.onclick = () => jumpToBookmark(tid, postNumber);
                     bookmarkViewContent.appendChild(item);
                 });
@@ -564,24 +637,31 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     const jumpToBookmark = (threadId, postNumber) => {
-        closeBookmarkModal();
-        const allBookmarks = BookmarkManager.getAll();
-        const threadData = allBookmarks[threadId];
-        // ジャンル情報が必要だが、栞データにはないため仮の値を設定
-        const genre = currentState.genre || 'unknown';
-        
-        // スレッド一覧ビューからジャンル情報を探す試み
-        let foundGenre = genre;
-        if(threadData) {
-            const threadLink = Array.from(threadListContainer.querySelectorAll('a')).find(a => a.href.includes(threadId));
-            if(threadLink) {
-                const parts = new URL(threadLink.href).pathname.split('/').filter(p => p);
-                if(parts.length === 2) foundGenre = parts[0];
-            }
-        }
-
-        history.pushState({ jumpToPostNumber: parseInt(postNumber, 10) }, '', `/${foundGenre}/${threadId}`);
+        closeBookmarkWindow();
+        const currentRoute = parsePath();
+        const genre = (currentRoute.view === 'threadContent' || currentRoute.view === 'threadList') ? currentRoute.genre : 'unknown';
+        history.pushState({ jumpToPostNumber: parseInt(postNumber, 10) }, '', `/${genre}/${threadId}`);
         router();
+    };
+
+    // --- Bookmark Window Drag Logic ---
+    let isDragging = false; let offsetX, offsetY;
+    const bookmarkHeader = document.getElementById('bookmark-header');
+    const savedPos = JSON.parse(localStorage.getItem('bookmark_pos') || 'null');
+    if (savedPos) { bookmarkWindow.style.left = savedPos.x; bookmarkWindow.style.top = savedPos.y; }
+    bookmarkHeader.onmousedown = (e) => {
+        isDragging = true;
+        offsetX = e.clientX - bookmarkWindow.offsetLeft;
+        offsetY = e.clientY - bookmarkWindow.offsetTop;
+        document.onmousemove = (e) => {
+            if (!isDragging) return;
+            bookmarkWindow.style.left = `${e.clientX - offsetX}px`;
+            bookmarkWindow.style.top = `${e.clientY - offsetY}px`;
+        };
+        document.onmouseup = () => {
+            isDragging = false; document.onmousemove = null; document.onmouseup = null;
+            localStorage.setItem('bookmark_pos', JSON.stringify({x: bookmarkWindow.style.left, y: bookmarkWindow.style.top}));
+        };
     };
 
     // --- Event Handlers & Form Submissions ---
@@ -617,9 +697,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const { new_post_count, latest_chunk_posts } = await res.json();
             form.reset();
             if (window.authState.user) form.elements['new-post-author'].value = window.authState.user.displayName;
-            renderPosts(latest_chunk_posts, true);
-            currentState.threadInfo.post_count = new_post_count;
-            updateOlderPostsLoaderVisibility();
+            
+            // 再読み込みして最新状態を表示
+            await prepareThreadContentView(threadId);
+
         } catch(err) { console.error(err); alert(err.message); } finally { btn.disabled = false; }
     });
 
