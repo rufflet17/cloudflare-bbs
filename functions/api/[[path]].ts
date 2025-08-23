@@ -110,13 +110,25 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 // -----------------------------------------------------------------------------
 
 async function getGenres(context: EventContext<Env, any, any>): Promise<Response> {
-    const { env } = context;
+    const { request, env, waitUntil } = context;
+    const normalizedUrl = normalizeUrl(request.url);
+
+    const cache = caches.default;
+    const cacheKey = new Request(normalizedUrl.toString(), request);
+
+    const cachedResponse = await cache.match(cacheKey);
+    if (cachedResponse) return cachedResponse;
+
     const { results } = await env.MY_D1_DATABASE2.prepare(
         "SELECT DISTINCT genre FROM threads_meta WHERE genre IS NOT NULL"
     ).all<{ genre: string }>();
-    return new Response(JSON.stringify(results ?? []), {
+
+    const response = new Response(JSON.stringify(results ?? []), {
         headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${THREAD_LIST_CACHE_TTL}` }
     });
+    
+    waitUntil(cache.put(cacheKey, response.clone()));
+    return response;
 }
 
 async function getThreads(context: EventContext<Env, any, any>): Promise<Response> {
@@ -151,7 +163,14 @@ async function getThreads(context: EventContext<Env, any, any>): Promise<Respons
 }
 
 async function getThreadInfo(context: EventContext<Env, any, any>, threadId: number): Promise<Response> {
-    const { env } = context;
+    const { request, env, waitUntil } = context;
+    const normalizedUrl = normalizeUrl(request.url);
+
+    const cache = caches.default;
+    const cacheKey = new Request(normalizedUrl.toString(), request);
+    const cachedResponse = await cache.match(cacheKey);
+    if (cachedResponse) return cachedResponse;
+
     const threadInfo = await env.MY_D1_DATABASE2.prepare(
         "SELECT id, title, genre, post_count FROM threads_meta WHERE id = ?"
     ).bind(threadId).first<Thread>();
@@ -159,7 +178,13 @@ async function getThreadInfo(context: EventContext<Env, any, any>, threadId: num
     if (!threadInfo) {
       return new Response(JSON.stringify({ error: "Thread not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
     }
-    return new Response(JSON.stringify(threadInfo), { headers: { "Content-Type": "application/json" } });
+
+    const response = new Response(JSON.stringify(threadInfo), {
+        headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${D1_CACHE_TTL}` }
+    });
+    
+    waitUntil(cache.put(cacheKey, response.clone()));
+    return response;
 }
 
 async function createThread(context: EventContext<Env, any, any>, body: { genre: string; title: string; author: string; body: string }): Promise<Response> {
@@ -183,10 +208,12 @@ async function createThread(context: EventContext<Env, any, any>, body: { genre:
   
   const genreThreadsCacheUrl = normalizeUrl(`${url.protocol}//${url.host}/api/threads?genre=${genre}`);
   const allThreadsCacheUrl = normalizeUrl(`${url.protocol}//${url.host}/api/threads`);
+  const genresCacheUrl = normalizeUrl(`${url.protocol}//${url.host}/api/genres`);
   
   waitUntil(Promise.all([
       cache.delete(new Request(genreThreadsCacheUrl.toString())),
-      cache.delete(new Request(allThreadsCacheUrl.toString()))
+      cache.delete(new Request(allThreadsCacheUrl.toString())),
+      cache.delete(new Request(genresCacheUrl.toString()))
   ]));
 
   return new Response(JSON.stringify({ id: newThreadId }), { status: 201, headers: { "Content-Type": "application/json" } });
@@ -262,9 +289,12 @@ async function createPost(context: EventContext<Env, any, any>, threadId: number
   const url = new URL(request.url);
   const genreThreadsCacheUrl = normalizeUrl(`${url.protocol}//${url.host}/api/threads?genre=${threadInfo.genre}`);
   const allThreadsCacheUrl = normalizeUrl(`${url.protocol}//${url.host}/api/threads`);
+  const threadInfoCacheUrl = normalizeUrl(`${url.protocol}//${url.host}/api/threads/${threadId}/info`);
+
    waitUntil(Promise.all([
       caches.default.delete(new Request(genreThreadsCacheUrl.toString())),
-      caches.default.delete(new Request(allThreadsCacheUrl.toString()))
+      caches.default.delete(new Request(allThreadsCacheUrl.toString())),
+      caches.default.delete(new Request(threadInfoCacheUrl.toString()))
   ]));
   
   const d1Offset = (latestChunkIndex - threadInfo.archived_chunk_count) * CHUNK_SIZE;
