@@ -33,7 +33,7 @@ interface DecodedToken {
 const CHUNK_SIZE = 50;
 const R2_CACHE_TTL = 60 * 60 * 24 * 365;
 const D1_CACHE_TTL = 60 * 60 * 24 * 7;
-const THREAD_LIST_CACHE_TTL = 2;
+const THREAD_LIST_CACHE_TTL = 60;
 
 function normalizeUrl(url: string | URL): URL {
   const urlObj = new URL(url);
