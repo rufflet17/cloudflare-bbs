@@ -412,7 +412,26 @@ document.addEventListener('DOMContentLoaded', () => {
             if (threadData && Object.keys(threadData.bookmarks).length > 0) { Object.entries(threadData.bookmarks).sort((a,b) => parseInt(a[0]) - parseInt(b[0])).forEach(([postNumber, bookmark]) => { const item = document.createElement('div'); item.className = 'bookmark-item'; item.innerHTML = `<div style="flex-grow: 1;"><strong>レス ${postNumber}</strong><div class="post-body">${escapeHTML(bookmark.content)}</div></div><button class="bookmark-delete-btn">削除</button>`; item.querySelector('.bookmark-delete-btn').onclick = (e) => { e.stopPropagation(); BookmarkManager.removeSingle(threadId, postNumber); updateBookmarkStyle(postNumber, false); prepareBookmarkView(threadId); }; item.onclick = () => jumpToBookmark(threadId, postNumber); bookmarkViewContent.appendChild(item); }); } else { bookmarkViewContent.insertAdjacentHTML('beforeend', '<p>このスレッドの栞はありません。</p>'); }
         } else {
             const title = document.createElement('h3'); title.textContent = '栞一覧'; bookmarkViewContent.appendChild(title);
-            if (Object.keys(allBookmarks).length > 0) { Object.entries(allBookmarks).forEach(([tid, threadData]) => { const newestBookmark = Object.entries(threadData.bookmarks).sort((a,b) => parseInt(b[0]) - parseInt(a[0]))[0]; if (!newestBookmark) return; const [postNumber, bookmark] = newestBookmark; const summaryContent = escapeHTML(bookmark.content.length > 10 ? bookmark.content.substring(0, 10) + '...' : bookmark.content); const item = document.createElement('div'); item.className = 'bookmark-item'; item.innerHTML = `<div style="flex-grow: 1;"><div><strong>${escapeHTML(threadData.title)}</strong></div><div class="post-summary">レス ${postNumber} ${summaryContent}</div></div><div style="text-align: right; display: flex; flex-direction: column; gap: 5px;"><button class="view-thread-bookmarks-btn">全件表示</button><button class="bookmark-delete-btn">全削除</button></div>`; item.querySelector('.view-thread-bookmarks-btn').onclick = (e) => { e.stopPropagation(); prepareBookmarkView(tid); }; item.querySelector('.bookmark-delete-btn').onclick = (e) => { e.stopPropagation(); if (confirm(`「${threadData.title}」の栞をすべて削除しますか？`)) { BookmarkManager.removeForThread(tid); prepareBookmarkView(); if(currentState.threadId === tid) { currentState.posts.forEach(p => updateBookmarkStyle(p.post_number, false)); } } }; item.onclick = () => jumpToBookmark(tid, postNumber); bookmarkViewContent.appendChild(item); }); } else { bookmarkViewContent.insertAdjacentHTML('beforeend', '<p>栞はまだありません。</p>'); }
+            if (Object.keys(allBookmarks).length > 0) {
+                Object.entries(allBookmarks).forEach(([tid, threadData]) => {
+                    const newestBookmark = Object.entries(threadData.bookmarks).sort((a,b) => parseInt(b[0]) - parseInt(a[0]))[0];
+                    if (!newestBookmark) return;
+                    const [postNumber, bookmark] = newestBookmark;
+                    
+                    const rawContent = bookmark.content;
+                    const summary = rawContent.length > 10 ? rawContent.substring(0, 10) + '...' : rawContent;
+                    const summaryContent = escapeHTML(summary);
+
+                    const item = document.createElement('div');
+                    item.className = 'bookmark-item';
+                    item.innerHTML = `<div style="flex-grow: 1;"><div><strong>${escapeHTML(threadData.title)}</strong></div><div class="post-summary">レス ${postNumber} ${summaryContent}</div></div><div style="text-align: right; display: flex; flex-direction: column; gap: 5px;"><button class="view-thread-bookmarks-btn">全件表示</button><button class="bookmark-delete-btn">全削除</button></div>`;
+                    
+                    item.querySelector('.view-thread-bookmarks-btn').onclick = (e) => { e.stopPropagation(); prepareBookmarkView(tid); };
+                    item.querySelector('.bookmark-delete-btn').onclick = (e) => { e.stopPropagation(); if (confirm(`「${threadData.title}」の栞をすべて削除しますか？`)) { BookmarkManager.removeForThread(tid); prepareBookmarkView(); if(currentState.threadId === tid) { currentState.posts.forEach(p => updateBookmarkStyle(p.post_number, false)); } } };
+                    item.onclick = () => jumpToBookmark(tid, postNumber);
+                    bookmarkViewContent.appendChild(item);
+                });
+            } else { bookmarkViewContent.insertAdjacentHTML('beforeend', '<p>栞はまだありません。</p>'); }
         }
     };
     const jumpToBookmark = (threadId, postNumber) => {
