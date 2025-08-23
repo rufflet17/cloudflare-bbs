@@ -157,8 +157,8 @@
         margin-left: 0;
     }
     
-    .back-button, #pagination-container button { margin-bottom: 15px; }
-    #pagination-container { text-align: center; }
+    .back-button { margin-bottom: 15px; }
+    #older-posts-loader { text-align: center; margin-bottom: 15px; }
 
     .view { display: none; } /* Helper class for views */
 
@@ -168,38 +168,9 @@
     .bookmark-delete-btn { font-size: 0.8em; padding: 2px 6px; background-color: #dc3545; }
 
     /* --- Modal Styles --- */
-    .modal-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0,0,0,0.5);
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        z-index: 1000;
-    }
-    .modal-content {
-        background-color: var(--main-bg-color);
-        padding: 20px;
-        border-radius: var(--card-radius);
-        width: 90%;
-        max-width: 700px;
-        max-height: 80vh;
-        overflow-y: auto;
-        position: relative;
-    }
-    .modal-close {
-        position: absolute;
-        top: 10px;
-        right: 10px;
-        font-size: 1.5em;
-        line-height: 1;
-        background: none;
-        border: none;
-        color: var(--text-color);
-    }
+    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; }
+    .modal-content { background-color: var(--main-bg-color); padding: 20px; border-radius: var(--card-radius); width: 90%; max-width: 700px; max-height: 80vh; overflow-y: auto; position: relative; }
+    .modal-close { position: absolute; top: 10px; right: 10px; font-size: 1.5em; line-height: 1; background: none; border: none; color: var(--text-color); cursor: pointer; }
   </style>
 </head>
 <body data-theme="classic">
@@ -248,8 +219,8 @@
       </div>
       <button class="back-button" id="back-to-thread-list-btn">&laquo; スレッド一覧に戻る</button>
       <h2 id="thread-title"></h2>
+      <div id="older-posts-loader"></div>
       <div id="posts-container"></div>
-      <div id="pagination-container"></div>
       <hr>
       <h3>レスを書き込む</h3>
       <form id="new-post-form">
@@ -268,9 +239,7 @@
   <div id="bookmark-modal" class="modal-overlay" style="display: none;">
     <div class="modal-content">
       <button class="modal-close" onclick="closeBookmarkModal()">×</button>
-      <div id="bookmark-view-content">
-        <!-- 栞の中身はJSで生成 -->
-      </div>
+      <div id="bookmark-view-content"></div>
     </div>
   </div>
 
@@ -326,6 +295,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const genreListContainer = document.getElementById('genre-list');
     const threadListContainer = document.getElementById('thread-list');
     const postsContainer = document.getElementById('posts-container');
+    const olderPostsLoader = document.getElementById('older-posts-loader');
     const bookmarkModal = document.getElementById('bookmark-modal');
     const bookmarkViewContent = document.getElementById('bookmark-view-content');
     
@@ -416,9 +386,46 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // --- View Preparation Functions ---
-    const prepareHomeView = async () => { /* 変更なし */ };
-    const prepareThreadListView = async (genre) => { /* 変更なし */ };
-
+    const prepareHomeView = async () => {
+        const res = await fetch('/api/genres', { cache: 'no-cache' });
+        if (!res.ok) await handleApiError(res);
+        const genres = await res.json();
+        genreListContainer.innerHTML = '';
+        if (genres && genres.length > 0) {
+            genres.forEach(({ genre }) => {
+                const a = document.createElement('a');
+                a.href = `/${genre}`;
+                a.className = 'list-item';
+                a.innerHTML = `<strong>${escapeHTML(genre)}</strong>`;
+                a.onclick = (e) => { e.preventDefault(); navigate(`/${genre}`); };
+                genreListContainer.appendChild(a);
+            });
+        } else {
+            genreListContainer.innerHTML = '<p>ジャンルはまだありません。</p>';
+        }
+    };
+    const prepareThreadListView = async (genre) => {
+        const res = await fetch(`/api/threads?genre=${genre}`, { cache: 'no-cache' });
+        if (!res.ok) await handleApiError(res);
+        const threads = await res.json();
+        document.getElementById('thread-list-title').textContent = `${escapeHTML(genre)} のスレッド一覧`;
+        document.getElementById('new-thread-genre').value = genre;
+        threadListContainer.innerHTML = '';
+        if (threads && threads.length > 0) {
+            threads.forEach(thread => {
+                const a = document.createElement('a');
+                a.href = `/${genre}/${thread.id}`;
+                a.className = 'thread-item';
+                const lastUpdatedDate = parseUTCDate(thread.last_updated);
+                const formattedDate = lastUpdatedDate.toLocaleString('ja-JP', { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+                a.innerHTML = `<div class="thread-details"><strong>${escapeHTML(thread.title)}</strong></div><div class="thread-meta">レス: ${thread.post_count}<br>更新: ${formattedDate}</div>`;
+                a.onclick = (e) => { e.preventDefault(); navigate(`/${genre}/${thread.id}`); };
+                threadListContainer.appendChild(a);
+            });
+        } else {
+            threadListContainer.innerHTML = '<p>スレッドはまだありません。</p>';
+        }
+    };
     const prepareThreadContentView = async (threadId, jumpToPostNumber = null) => {
         postsContainer.innerHTML = '読み込み中...';
         const infoRes = await fetch(`/api/threads/${threadId}/info`, { cache: 'no-cache' });
@@ -448,9 +455,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         currentState.loadedChunks = new Set(posts.map(p => Math.floor((p.post_number-1)/CHUNK_SIZE)));
+        updateOlderPostsLoaderVisibility();
     };
     
-    // --- Post Rendering ---
+    // --- Post Rendering & Loading ---
     const renderPosts = (posts, clear = true, prepend = false) => {
         if(clear) postsContainer.innerHTML = '';
         const sortedPosts = posts.sort((a, b) => a.post_number - b.post_number);
@@ -471,19 +479,52 @@ document.addEventListener('DOMContentLoaded', () => {
         if (prepend) postsContainer.prepend(fragment);
         else postsContainer.appendChild(fragment);
     };
+
+    const updateOlderPostsLoaderVisibility = () => {
+        olderPostsLoader.innerHTML = '';
+        const firstPostEl = postsContainer.querySelector('.post');
+        if (!firstPostEl) return;
+        const firstPostNum = parseInt(firstPostEl.id.replace('post-', ''), 10);
+        if (firstPostNum > 1) {
+            olderPostsLoader.innerHTML = `<button onclick="loadOlderPosts(this)">前のレスを表示</button>`;
+        }
+    };
+
+    window.loadOlderPosts = async (button) => {
+        if (isLoadingPosts) return;
+        isLoadingPosts = true;
+        button.disabled = true;
+        button.textContent = '読み込み中...';
+        try {
+            const firstPostEl = postsContainer.querySelector('.post');
+            const firstPostNum = parseInt(firstPostEl.id.replace('post-', ''), 10);
+            const chunkToLoad = Math.floor((firstPostNum - 2) / CHUNK_SIZE);
+            if (chunkToLoad < 0 || currentState.loadedChunks.has(chunkToLoad)) return;
+
+            const res = await fetch(`/api/threads/${currentState.threadId}/posts?chunk=${chunkToLoad}`, { cache: 'no-cache' });
+            if (!res.ok) throw new Error('Failed to load older posts');
+            const olderPosts = await res.json();
+            
+            if(olderPosts.length > 0) {
+                renderPosts(olderPosts, false, true);
+                currentState.loadedChunks.add(chunkToLoad);
+            }
+        } catch(error) {
+            console.error(error);
+            button.textContent = '読み込み失敗';
+        } finally {
+            isLoadingPosts = false;
+            updateOlderPostsLoaderVisibility();
+        }
+    };
     
     // --- Bookmark Modal Logic ---
-    window.openBookmarkModal = (threadId = null) => {
-        prepareBookmarkView(threadId);
-        bookmarkModal.style.display = 'flex';
-    };
+    window.openBookmarkModal = (threadId = null) => { prepareBookmarkView(threadId); bookmarkModal.style.display = 'flex'; };
     window.closeBookmarkModal = () => { bookmarkModal.style.display = 'none'; };
-
     const prepareBookmarkView = (threadId) => {
         bookmarkViewContent.innerHTML = '';
         const allBookmarks = BookmarkManager.getAll();
-
-        if (threadId) { // スレッド別栞ページ
+        if (threadId) {
             const threadData = allBookmarks[threadId];
             const title = document.createElement('h2');
             title.textContent = `栞: ${escapeHTML(threadData?.title || '不明なスレッド')}`;
@@ -492,7 +533,6 @@ document.addEventListener('DOMContentLoaded', () => {
             backBtn.textContent = '« 栞一覧に戻る';
             backBtn.onclick = () => prepareBookmarkView(null);
             bookmarkViewContent.append(backBtn, title);
-            
             if (threadData && Object.keys(threadData.bookmarks).length > 0) {
                  Object.entries(threadData.bookmarks).sort((a,b) => a[0] - b[0]).forEach(([postNumber, bookmark]) => {
                     const item = document.createElement('div');
@@ -503,12 +543,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     bookmarkViewContent.appendChild(item);
                 });
             } else { bookmarkViewContent.insertAdjacentHTML('beforeend', '<p>このスレッドの栞はありません。</p>'); }
-
-        } else { // 栞トップページ
+        } else {
             const title = document.createElement('h2');
             title.textContent = '栞一覧';
             bookmarkViewContent.appendChild(title);
-            
             if (Object.keys(allBookmarks).length > 0) {
                 Object.entries(allBookmarks).forEach(([tid, threadData]) => {
                     const newestBookmark = Object.entries(threadData.bookmarks).sort((a,b) => b[0] - a[0])[0];
@@ -525,39 +563,26 @@ document.addEventListener('DOMContentLoaded', () => {
             } else { bookmarkViewContent.insertAdjacentHTML('beforeend', '<p>栞はまだありません。</p>'); }
         }
     };
-    
     const jumpToBookmark = (threadId, postNumber) => {
         closeBookmarkModal();
-        const currentRoute = parsePath();
-        const genre = currentRoute.view === 'threadContent' && currentRoute.threadId === threadId ? currentRoute.genre : 'unknown-genre';
-        history.pushState({ jumpToPostNumber: parseInt(postNumber, 10) }, '', `/${genre}/${threadId}`);
+        const allBookmarks = BookmarkManager.getAll();
+        const threadData = allBookmarks[threadId];
+        // ジャンル情報が必要だが、栞データにはないため仮の値を設定
+        const genre = currentState.genre || 'unknown';
+        
+        // スレッド一覧ビューからジャンル情報を探す試み
+        let foundGenre = genre;
+        if(threadData) {
+            const threadLink = Array.from(threadListContainer.querySelectorAll('a')).find(a => a.href.includes(threadId));
+            if(threadLink) {
+                const parts = new URL(threadLink.href).pathname.split('/').filter(p => p);
+                if(parts.length === 2) foundGenre = parts[0];
+            }
+        }
+
+        history.pushState({ jumpToPostNumber: parseInt(postNumber, 10) }, '', `/${foundGenre}/${threadId}`);
         router();
     };
-
-    // --- Infinite Scroll ---
-    window.addEventListener('scroll', async () => {
-        if (isLoadingPosts || views.threadContent.style.display !== 'block' || window.scrollY > 50) return;
-        isLoadingPosts = true;
-        try {
-            const firstPostEl = postsContainer.querySelector('.post');
-            if (!firstPostEl) return;
-            const firstPostNum = parseInt(firstPostEl.id.replace('post-', ''), 10);
-            if (firstPostNum <= 1) return;
-
-            const chunkToLoad = Math.floor((firstPostNum - 2) / CHUNK_SIZE);
-            if (chunkToLoad < 0 || currentState.loadedChunks.has(chunkToLoad)) return;
-
-            const res = await fetch(`/api/threads/${currentState.threadId}/posts?chunk=${chunkToLoad}`, { cache: 'no-cache' });
-            if (!res.ok) return;
-            const olderPosts = await res.json();
-            if(olderPosts.length === 0) { currentState.loadedChunks.add(chunkToLoad); return; }
-            
-            const currentScrollHeight = document.documentElement.scrollHeight;
-            renderPosts(olderPosts, false, true);
-            window.scrollTo(0, document.documentElement.scrollHeight - currentScrollHeight);
-            currentState.loadedChunks.add(chunkToLoad);
-        } finally { isLoadingPosts = false; }
-    });
 
     // --- Event Handlers & Form Submissions ---
     document.querySelector('header a').onclick = (e) => { e.preventDefault(); navigate('/'); };
@@ -594,6 +619,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (window.authState.user) form.elements['new-post-author'].value = window.authState.user.displayName;
             renderPosts(latest_chunk_posts, true);
             currentState.threadInfo.post_count = new_post_count;
+            updateOlderPostsLoaderVisibility();
         } catch(err) { console.error(err); alert(err.message); } finally { btn.disabled = false; }
     });
 
