@@ -148,6 +148,7 @@ async function getThreads(context: EventContext<Env, any, any>): Promise<Respons
   return response;
 }
 
+// [修正点 1]
 async function getThreadInfo(context: EventContext<Env, any, any>, threadId: string): Promise<Response> {
     const { env } = context;
     const threadInfo = await env.MY_D1_DATABASE2.prepare(
@@ -157,7 +158,13 @@ async function getThreadInfo(context: EventContext<Env, any, any>, threadId: str
     if (!threadInfo) {
       return new Response(JSON.stringify({ error: "Thread not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
     }
-    return new Response(JSON.stringify(threadInfo), { headers: { "Content-Type": "application/json" } });
+    // ブラウザにキャッシュさせないようにCache-Controlヘッダーを追加
+    return new Response(JSON.stringify(threadInfo), { 
+        headers: { 
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache, no-store, must-revalidate"
+        } 
+    });
 }
 
 async function createThread(context: EventContext<Env, any, any>, body: { genre: string; title: string; author: string; body: string }): Promise<Response> {
@@ -167,10 +174,10 @@ async function createThread(context: EventContext<Env, any, any>, body: { genre:
 
   const newThreadId = crypto.randomUUID();
 
-  // 関連テーブルで使うため、まずthreadsテーブルに挿入（スキーマでidがTEXT PRIMARY KEYになっている必要があります）
-  await env.MY_D1_DATABASE2.prepare("INSERT INTO threads (id, title) VALUES (?, ?)").bind(newThreadId, title).run();
-  
+  // 関連するINSERTを全て単一のトランザクションにまとめる
   await env.MY_D1_DATABASE2.batch([
+    env.MY_D1_DATABASE2.prepare("INSERT INTO threads (id, title) VALUES (?, ?)")
+      .bind(newThreadId, title),
     env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body) VALUES (?, 1, ?, ?)")
       .bind(newThreadId, author || '名無しさん', postBody),
     env.MY_D1_DATABASE2.prepare("INSERT INTO threads_meta (id, title, genre, post_count) VALUES (?, ?, ?, 1)")
@@ -191,6 +198,7 @@ async function createThread(context: EventContext<Env, any, any>, body: { genre:
   return new Response(JSON.stringify({ id: newThreadId }), { status: 201, headers: { "Content-Type": "application/json" } });
 }
 
+// [修正点 2]
 async function getPostsForThread(context: EventContext<Env, any, any>, threadId: string): Promise<Response> {
   const { request, env, waitUntil } = context;
   const normalizedUrl = normalizeUrl(request.url);
@@ -207,14 +215,14 @@ async function getPostsForThread(context: EventContext<Env, any, any>, threadId:
   if (!threadInfo) return new Response(JSON.stringify({ error: "Thread not found" }), { status: 404 });
   
   let posts: Post[] | null = null;
-  let cacheTtl = D1_CACHE_TTL;
+  let sMaxAge = D1_CACHE_TTL; // Cloudflare Edgeのキャッシュ時間
 
   if (chunkIndex < threadInfo.archived_chunk_count) {
     const r2Key = `thread/${threadId}/${chunkIndex}.json`;
     const r2Object = await env.MY_R2_BUCKET2.get(r2Key);
     if (r2Object) {
         posts = await r2Object.json<Post[]>();
-        cacheTtl = R2_CACHE_TTL;
+        sMaxAge = R2_CACHE_TTL; // R2からのデータはより長くキャッシュ
     }
   } else {
     const d1Offset = (chunkIndex - threadInfo.archived_chunk_count) * CHUNK_SIZE;
@@ -224,8 +232,15 @@ async function getPostsForThread(context: EventContext<Env, any, any>, threadId:
     posts = results;
   }
 
+  // Cache-Controlヘッダーを修正
+  // s-maxage: Cloudflareのような共有キャッシュの有効期間
+  // max-age=0: ブラウザキャッシュは即時無効
+  // must-revalidate: ブラウザは毎回サーバーに鮮度を問い合わせる
   const response = new Response(JSON.stringify(posts ?? []), {
-    headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${cacheTtl}` }
+    headers: { 
+        "Content-Type": "application/json", 
+        "Cache-Control": `public, max-age=0, s-maxage=${sMaxAge}, must-revalidate`
+    }
   });
   
   if (posts && posts.length > 0) {
