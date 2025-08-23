@@ -120,25 +120,22 @@ async function verifyFirebaseToken(token: string, env: Env): Promise<DecodedToke
 // 2. メインハンドラ (リクエストのルーティング)
 // -----------------------------------------------------------------------------
 export const onRequest: PagesFunction<Env> = async (context) => {
-  const { request, next, data, env } = context;
+  const { request, data, env } = context;
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method;
 
   try {
-    // 認証ミドルウェア
-    if (method === 'POST') {
-        if (path.startsWith('/api/threads')) { // スレッド作成とレス投稿を保護
-            const authHeader = request.headers.get('Authorization');
-            if (!authHeader || !authHeader.startsWith('Bearer ')) {
-                return new Response(JSON.stringify({ error: "認証が必要です。" }), { status: 401 });
-            }
+    // 認証ミドルウェア (Authorizationヘッダーがあれば検証)
+    if (method === 'POST' && path.startsWith('/api/threads')) {
+        const authHeader = request.headers.get('Authorization');
+        if (authHeader && authHeader.startsWith('Bearer ')) {
             const token = authHeader.substring(7);
             const decodedToken = await verifyFirebaseToken(token, env);
             if (!decodedToken) {
                 return new Response(JSON.stringify({ error: "トークンが無効です。" }), { status: 403 });
             }
-            data.decodedToken = decodedToken; // 後続の関数で使えるように格納
+            data.decodedToken = decodedToken;
         }
     }
 
@@ -212,13 +209,13 @@ async function getThreadInfo(context: EventContext<Env, any, any>, threadId: str
     return new Response(JSON.stringify(threadInfo), { headers: { "Content-Type": "application/json", "Cache-Control": "no-cache, no-store, must-revalidate" } });
 }
 
-async function createThread(context: EventContext<Env, any, any>, body: { genre: string; title: string; body: string }): Promise<Response> {
-  const { request, env, waitUntil, data } = context;
-  const { genre, title, body: postBody } = body;
+async function createThread(context: EventContext<Env, any, any>, body: { genre: string; title: string; author: string; body: string }): Promise<Response> {
+  const { env, waitUntil, data } = context;
+  const { genre, title, author, body: postBody } = body;
   if (!genre || !title || !postBody) return new Response(JSON.stringify({ error: "Genre, title and body are required." }), { status: 400 });
 
-  const decodedToken = data.decodedToken as DecodedToken;
-  const authorName = decodedToken.name || '名無しさん';
+  const decodedToken = data.decodedToken as DecodedToken | undefined;
+  const authorName = decodedToken ? (decodedToken.name || '名無しさん') : (author || '名無しさん');
   const newThreadId = crypto.randomUUID();
 
   await env.MY_D1_DATABASE2.batch([
@@ -230,7 +227,7 @@ async function createThread(context: EventContext<Env, any, any>, body: { genre:
   ]);
   
   const cache = caches.default;
-  const url = new URL(request.url);
+  const url = new URL(context.request.url);
   const genreThreadsCacheUrl = normalizeUrl(`${url.protocol}//${url.host}/api/threads?genre=${genre}`);
   const allThreadsCacheUrl = normalizeUrl(`${url.protocol}//${url.host}/api/threads`);
   waitUntil(Promise.all([
@@ -271,13 +268,13 @@ async function getPostsForThread(context: EventContext<Env, any, any>, threadId:
   return response;
 }
 
-async function createPost(context: EventContext<Env, any, any>, threadId: string, body: { body: string }): Promise<Response> {
-  const { request, env, waitUntil, data } = context;
-  const { body: postBody } = body;
+async function createPost(context: EventContext<Env, any, any>, threadId: string, body: { author: string, body: string }): Promise<Response> {
+  const { env, waitUntil, data, request } = context;
+  const { author, body: postBody } = body;
   if (!postBody) return new Response(JSON.stringify({ error: "Body is required." }), { status: 400 });
 
-  const decodedToken = data.decodedToken as DecodedToken;
-  const authorName = decodedToken.name || '名無しさん';
+  const decodedToken = data.decodedToken as DecodedToken | undefined;
+  const authorName = decodedToken ? (decodedToken.name || '名無しさん') : (author || '名無しさん');
 
   const threadInfo = await env.MY_D1_DATABASE2.prepare("UPDATE threads_meta SET post_count = post_count + 1, last_updated = CURRENT_TIMESTAMP WHERE id = ? RETURNING post_count, archived_chunk_count, genre").bind(threadId).first<{ post_count: number, archived_chunk_count: number, genre: string }>();
   if (!threadInfo) throw new Error("Failed to update thread counters.");

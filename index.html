@@ -193,7 +193,7 @@
       <form id="new-thread-form">
         <input type="hidden" id="new-thread-genre">
         <input type="text" id="new-thread-title" placeholder="スレッドタイトル" required>
-        <input type="text" id="new-thread-author" placeholder="ログインすると名前が自動入力されます" readonly>
+        <input type="text" id="new-thread-author" placeholder="名前 (省略可)">
         <textarea id="new-thread-body" placeholder="最初の書き込み" rows="4" required></textarea>
         <button type="submit">スレッド作成</button>
       </form>
@@ -209,7 +209,7 @@
       <h3>レスを書き込む</h3>
       <form id="new-post-form">
         <input type="hidden" id="current-thread-id">
-        <input type="text" id="new-post-author" placeholder="ログインすると名前が自動入力されます" readonly>
+        <input type="text" id="new-post-author" placeholder="名前 (省略可)">
         <textarea id="new-post-body" placeholder="書き込み内容" rows="4" required></textarea>
         <button type="submit">書き込む</button>
       </form>
@@ -249,16 +249,30 @@
       userDisplay.textContent = `${user.displayName} さん`;
       loginBtn.style.display = 'none';
       logoutBtn.style.display = 'inline';
-      if(newThreadAuthorInput) newThreadAuthorInput.value = user.displayName;
-      if(newPostAuthorInput) newPostAuthorInput.value = user.displayName;
+      if(newThreadAuthorInput) {
+        newThreadAuthorInput.value = user.displayName;
+        newThreadAuthorInput.readOnly = true;
+      }
+      if(newPostAuthorInput) {
+        newPostAuthorInput.value = user.displayName;
+        newPostAuthorInput.readOnly = true;
+      }
     } else {
       window.authState.user = null;
       window.authState.idToken = null;
       userDisplay.textContent = '';
       loginBtn.style.display = 'inline';
       logoutBtn.style.display = 'none';
-      if(newThreadAuthorInput) newThreadAuthorInput.value = '';
-      if(newPostAuthorInput) newPostAuthorInput.value = '';
+      if(newThreadAuthorInput) {
+        newThreadAuthorInput.value = '';
+        newThreadAuthorInput.readOnly = false;
+        newThreadAuthorInput.placeholder = "名前 (省略可)";
+      }
+      if(newPostAuthorInput) {
+        newPostAuthorInput.value = '';
+        newPostAuthorInput.readOnly = false;
+        newPostAuthorInput.placeholder = "名前 (省略可)";
+      }
     }
   });
 
@@ -491,10 +505,11 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('new-thread-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const idToken = window.authState.idToken;
-        if (!idToken) {
-            alert("スレッドを作成するにはログインが必要です。");
-            return;
+        const headers = { 'Content-Type': 'application/json' };
+        if (idToken) {
+            headers['Authorization'] = `Bearer ${idToken}`;
         }
+        
         const form = e.target;
         const button = form.querySelector('button');
         button.disabled = true;
@@ -502,10 +517,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const res = await fetch('/api/threads', {
                 method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${idToken}`
-                },
+                headers: headers,
                 body: JSON.stringify({
                     genre: genre,
                     title: document.getElementById('new-thread-title').value,
@@ -529,10 +541,11 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('new-post-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const idToken = window.authState.idToken;
-        if (!idToken) {
-            alert("書き込むにはログインが必要です。");
-            return;
+        const headers = { 'Content-Type': 'application/json' };
+        if (idToken) {
+            headers['Authorization'] = `Bearer ${idToken}`;
         }
+        
         const form = e.target;
         const button = form.querySelector('button');
         const threadId = document.getElementById('current-thread-id').value;
@@ -540,10 +553,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const res = await fetch(`/api/threads/${threadId}/posts`, {
                 method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${idToken}`
-                },
+                headers: headers,
                 body: JSON.stringify({
                     author: document.getElementById('new-post-author').value,
                     body: document.getElementById('new-post-body').value
