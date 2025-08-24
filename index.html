@@ -193,16 +193,14 @@
       const name = customName || (user ? user.displayName : '');
       const userDisplay = document.getElementById('user-display');
       const newThreadAuthorInput = document.getElementById('new-thread-author');
-      const newPostAuthorInput = document.getElementById('new-post-author');
-
+      
       if (user) {
           userDisplay.textContent = `${name} さん`;
+          // スレッド作成時の名前欄は、ログインユーザーは編集不可とする
           if (newThreadAuthorInput) { newThreadAuthorInput.value = name; newThreadAuthorInput.readOnly = true; }
-          if (newPostAuthorInput) { newPostAuthorInput.value = name; newPostAuthorInput.readOnly = true; }
       } else {
           userDisplay.textContent = '';
           if (newThreadAuthorInput) { newThreadAuthorInput.value = ''; newThreadAuthorInput.readOnly = false; newThreadAuthorInput.placeholder = "名前 (省略可)"; }
-          if (newPostAuthorInput) { newPostAuthorInput.value = ''; newPostAuthorInput.readOnly = false; newPostAuthorInput.placeholder = "名前 (省略可)"; }
       }
   }
 
@@ -227,6 +225,10 @@
       logoutBtn.style.display = 'none';
       changeNameBtn.style.display = 'none';
     }
+    
+    if (document.getElementById('thread-content-view').style.display === 'block' && window.currentState && window.currentState.threadInfo) {
+        window.updatePostFormControls(window.currentState.threadInfo);
+    }
   });
 
   document.getElementById('change-name-btn').addEventListener('click', () => {
@@ -235,13 +237,16 @@
     const currentCustomName = localStorage.getItem(CUSTOM_NAME_KEY) || '';
     const newName = prompt('新しい名前を入力してください（空にするとGoogleアカウント名に戻ります）:', currentCustomName);
 
-    if (newName !== null) { // キャンセルされなかった場合
+    if (newName !== null) {
         if (newName.trim() === '') {
             localStorage.removeItem(CUSTOM_NAME_KEY);
             updateUserFields(user, null);
         } else {
             localStorage.setItem(CUSTOM_NAME_KEY, newName);
             updateUserFields(user, newName);
+        }
+        if (document.getElementById('thread-content-view').style.display === 'block' && window.currentState && window.currentState.threadInfo) {
+            window.updatePostFormControls(window.currentState.threadInfo);
         }
     }
   });
@@ -351,7 +356,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const jumpToPostNumber = history.state?.jumpToPostNumber;
         history.replaceState(null, '', window.location.pathname); 
 
-        currentState = { ...route, jumpToPostNumber };
+        window.currentState = { ...route, jumpToPostNumber };
         let nextView;
         try {
             switch (route.view) {
@@ -389,7 +394,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const form = document.getElementById('new-thread-form');
         form.reset();
         document.getElementById('new-thread-genre').value = genre;
-        // ログイン状態に応じて名前欄を再設定
         const customName = localStorage.getItem('bbs_custom_username');
         if (window.authState.user) {
             const authorInput = document.getElementById('new-thread-author');
@@ -398,14 +402,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    const updatePostFormControls = (threadInfo) => {
+    // ★★★ 修正箇所 ★★★
+    window.updatePostFormControls = (threadInfo) => {
         const formContainer = document.getElementById('new-post-form-container');
         const form = document.getElementById('new-post-form');
         const authorInput = document.getElementById('new-post-author');
         const bodyInput = document.getElementById('new-post-body');
         const submitBtn = form.querySelector('button');
 
-        // デフォルト表示
         formContainer.style.display = 'block';
         authorInput.disabled = false;
         bodyInput.disabled = false;
@@ -414,7 +418,7 @@ document.addEventListener('DOMContentLoaded', () => {
         authorInput.placeholder = "名前 (省略可)";
         
         if (threadInfo.write_permission === 'authenticated' && !window.authState.user) {
-            formContainer.style.display = 'none'; // ログインしてないとフォームごと非表示
+            formContainer.style.display = 'none';
             return;
         }
 
@@ -424,13 +428,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 authorInput.disabled = true;
                 break;
             case 'account_linked':
-                authorInput.value = window.authState.user?.displayName || '名無しさん';
+                if (window.authState.user) {
+                    authorInput.value = window.authState.user.displayName || '名無しさん';
+                }
                 authorInput.disabled = true;
                 break;
             case 'user_choice':
             default:
-                authorInput.disabled = !!window.authState.user; // ログインユーザーは名前変更不可
-                if (!window.authState.user) {
+                authorInput.disabled = false; // ★ 常に編集可能にする
+                if (window.authState.user) {
+                    // ログインユーザーにはデフォルト名を設定するが、編集は自由にできる
+                    const customName = localStorage.getItem('bbs_custom_username');
+                    authorInput.value = customName || window.authState.user.displayName;
+                } else {
+                    // ログインしていないユーザーは空欄から入力
                     authorInput.value = '';
                 }
                 break;
@@ -443,17 +454,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const infoRes = await fetch(`/api/threads/${threadId}/info`, { cache: 'no-cache' });
         if (!infoRes.ok) await handleApiError(infoRes);
         const threadInfo = await infoRes.json();
-        currentState = { ...currentState, threadInfo, threadId, posts: [], loadedChunks: new Set() };
+        window.currentState = { ...window.currentState, threadInfo, threadId, posts: [], loadedChunks: new Set() };
         document.getElementById('thread-title').textContent = threadInfo.title;
         document.getElementById('current-thread-id').value = threadInfo.id;
         
-        updatePostFormControls(threadInfo);
+        window.updatePostFormControls(threadInfo);
 
         let fetchedPosts = [];
         
         if (jumpToPostNumber) {
             const targetChunk = Math.floor((jumpToPostNumber - 1) / CHUNK_SIZE);
-            const startChunk = Math.max(0, targetChunk - 1); // ターゲットの一つ前のチャンクから取得
+            const startChunk = Math.max(0, targetChunk - 1);
             const chunksNeededAfter = Math.ceil(POSTS_PER_PAGE / CHUNK_SIZE);
             const endChunk = targetChunk + chunksNeededAfter - 1;
             
@@ -466,7 +477,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const targetIndex = allFetchedPosts.findIndex(p => p.post_number === jumpToPostNumber);
 
             if (targetIndex !== -1) {
-                const startIndex = Math.max(0, targetIndex - 50); // 前は最大50件
+                const startIndex = Math.max(0, targetIndex - 50);
                 const endIndex = targetIndex + POSTS_PER_PAGE;
                 fetchedPosts = allFetchedPosts.slice(startIndex, endIndex);
             } else {
@@ -487,7 +498,7 @@ document.addEventListener('DOMContentLoaded', () => {
             fetchedPosts = (await fetchPostChunks(chunksToFetch)).sort((a,b) => a.post_number - b.post_number);
         }
         
-        currentState.posts = fetchedPosts;
+        window.currentState.posts = fetchedPosts;
         renderPosts(true);
         
         if (jumpToPostNumber) { 
@@ -497,27 +508,27 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // --- Post Rendering & Loading (変更なし) ---
     const fetchPostChunks = async (chunkNumbers) => {
-        const chunksToFetch = chunkNumbers.filter(cn => !currentState.loadedChunks.has(cn));
+        const chunksToFetch = chunkNumbers.filter(cn => !window.currentState.loadedChunks.has(cn));
         if (chunksToFetch.length === 0) return [];
-        const promises = chunksToFetch.map(i => { currentState.loadedChunks.add(i); return fetch(`/api/threads/${currentState.threadId}/posts?chunk=${i}`, { cache: 'no-cache' }).then(res => res.json()); });
+        const promises = chunksToFetch.map(i => { window.currentState.loadedChunks.add(i); return fetch(`/api/threads/${window.currentState.threadId}/posts?chunk=${i}`, { cache: 'no-cache' }).then(res => res.json()); });
         return (await Promise.all(promises)).flat();
     };
     
     const renderPosts = (clear = true) => {
         if(clear) postsContainer.innerHTML = '';
         const fragment = document.createDocumentFragment();
-        currentState.posts.forEach(post => {
+        window.currentState.posts.forEach(post => {
             if (document.getElementById(`post-${post.post_number}`)) return;
             const div = document.createElement('div');
             div.className = 'post';
             div.id = `post-${post.post_number}`;
-            const isBookmarked = BookmarkManager.isBookmarked(currentState.threadId, post.post_number);
+            const isBookmarked = BookmarkManager.isBookmarked(window.currentState.threadId, post.post_number);
             if(isBookmarked) div.classList.add('bookmarked');
             const formattedDate = parseUTCDate(post.created_at)?.toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
             div.innerHTML = `<div class="post-header"><span class="post-header-main"><span class="post-number">${post.post_number}</span>: ${escapeHTML(post.author || '名無しさん')}</span><span class="post-date">${formattedDate}</span></div><div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>`;
             div.querySelector('.post-header').addEventListener('click', (e) => {
                 e.stopPropagation();
-                const isNowBookmarked = BookmarkManager.toggle(currentState.threadId, currentState.threadInfo.title, post);
+                const isNowBookmarked = BookmarkManager.toggle(window.currentState.threadId, window.currentState.threadInfo.title, post);
                 updateBookmarkStyle(post.post_number, isNowBookmarked);
                 if (bookmarkModal.style.display === 'flex') { const currentTid = bookmarkViewContent.dataset.currentTid; prepareBookmarkView(currentTid === 'null' ? null : currentTid); }
             });
@@ -529,7 +540,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const updateOlderPostsLoaderVisibility = () => {
-        const firstPostNum = currentState.posts[0]?.post_number;
+        const firstPostNum = window.currentState.posts[0]?.post_number;
         const loaderBtn = postsLoader.querySelector('.load-older-btn');
         if (firstPostNum > 1) { if (!loaderBtn) { postsLoader.insertAdjacentHTML('afterbegin', `<button class="load-older-btn" onclick="loadOlderPosts(this)">前のレス${POSTS_PER_PAGE}件を表示</button>`); } } else { if (loaderBtn) loaderBtn.remove(); }
     };
@@ -537,13 +548,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isLoadingPosts) return;
         isLoadingPosts = true; button.disabled = true; button.textContent = '読み込み中...';
         try {
-            const firstPostNum = currentState.posts[0].post_number;
+            const firstPostNum = window.currentState.posts[0].post_number;
             const currentChunk = Math.floor((firstPostNum - 1) / CHUNK_SIZE);
             const chunksNeeded = Math.ceil(POSTS_PER_PAGE / CHUNK_SIZE);
             const startChunk = Math.max(0, currentChunk - chunksNeeded);
             const chunksToFetch = Array.from({length: currentChunk - startChunk}, (_, i) => startChunk + i);
             const olderPosts = await fetchPostChunks(chunksToFetch);
-            if(olderPosts.length > 0) { const currentTopPost = postsContainer.querySelector('.post'); currentState.posts.unshift(...olderPosts); currentState.posts.sort((a,b) => a.post_number - b.post_number); renderPosts(true); document.getElementById(currentTopPost.id)?.scrollIntoView(); }
+            if(olderPosts.length > 0) { const currentTopPost = postsContainer.querySelector('.post'); window.currentState.posts.unshift(...olderPosts); window.currentState.posts.sort((a,b) => a.post_number - b.post_number); renderPosts(true); document.getElementById(currentTopPost.id)?.scrollIntoView(); }
         } catch(error) { console.error(error); button.textContent = '読み込み失敗'; } finally { isLoadingPosts = false; }
     };
     window.loadMorePosts = async (button, startChunk) => {
@@ -554,8 +565,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const endChunk = startChunk + chunksNeeded - 1;
             const chunksToFetch = Array.from({length: endChunk - startChunk + 1}, (_, i) => startChunk + i);
             const morePosts = await fetchPostChunks(chunksToFetch);
-            if (morePosts.length > 0) { currentState.posts.push(...morePosts); currentState.posts.sort((a,b) => a.post_number - b.post_number); renderPosts(true); }
-            const remainingPosts = currentState.threadInfo.post_count - ((endChunk + 1) * CHUNK_SIZE);
+            if (morePosts.length > 0) { window.currentState.posts.push(...morePosts); window.currentState.posts.sort((a,b) => a.post_number - b.post_number); renderPosts(true); }
+            const remainingPosts = window.currentState.threadInfo.post_count - ((endChunk + 1) * CHUNK_SIZE);
             if (remainingPosts > 0) { button.textContent = `続きから読む (${remainingPosts}レス)`; button.onclick = () => loadMorePosts(button, endChunk + 1); button.disabled = false; } else { button.remove(); }
         } catch(error) { console.error(error); button.textContent = '読み込み失敗'; } finally { isLoadingPosts = false; }
     };
@@ -592,7 +603,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     item.innerHTML = `<div style="flex-grow: 1;"><div><strong>${escapeHTML(threadData.title)}</strong></div><div class="post-summary">レス ${postNumber} ${summaryContent}</div></div><div style="text-align: right; display: flex; flex-direction: column; gap: 5px;"><button class="view-thread-bookmarks-btn">全件表示</button><button class="bookmark-delete-btn">全削除</button></div>`;
                     
                     item.querySelector('.view-thread-bookmarks-btn').onclick = (e) => { e.stopPropagation(); prepareBookmarkView(tid); };
-                    item.querySelector('.bookmark-delete-btn').onclick = (e) => { e.stopPropagation(); if (confirm(`「${threadData.title}」の栞をすべて削除しますか？`)) { BookmarkManager.removeForThread(tid); prepareBookmarkView(); if(currentState.threadId === tid) { currentState.posts.forEach(p => updateBookmarkStyle(p.post_number, false)); } } };
+                    item.querySelector('.bookmark-delete-btn').onclick = (e) => { e.stopPropagation(); if (confirm(`「${threadData.title}」の栞をすべて削除しますか？`)) { BookmarkManager.removeForThread(tid); prepareBookmarkView(); if(window.currentState.threadId === tid) { window.currentState.posts.forEach(p => updateBookmarkStyle(p.post_number, false)); } } };
                     item.onclick = () => jumpToBookmark(tid, postNumber);
                     bookmarkViewContent.appendChild(item);
                 });
@@ -601,7 +612,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     const jumpToBookmark = (threadId, postNumber) => {
         const autoDelete = autoDeleteBookmarkCheckbox.checked;
-        if (autoDelete) { BookmarkManager.removeSingle(threadId, postNumber); if (currentState.threadId === threadId) { updateBookmarkStyle(postNumber, false); } }
+        if (autoDelete) { BookmarkManager.removeSingle(threadId, postNumber); if (window.currentState.threadId === threadId) { updateBookmarkStyle(postNumber, false); } }
         closeBookmarkModal();
         const currentRoute = parsePath();
         const genre = (currentRoute.view === 'threadContent' || currentRoute.view === 'threadList') ? currentRoute.genre : 'unknown';
@@ -612,10 +623,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Event Handlers & Form Submissions ---
     document.querySelector('header h1 a').onclick = (e) => { e.preventDefault(); navigate('/'); };
     backToHomeBtnHeader.onclick = () => navigate('/');
-    backToThreadListBtnHeader.onclick = () => navigate(`/${currentState.genre}`);
+    backToThreadListBtnHeader.onclick = () => navigate(`/${window.currentState.genre}`);
     window.addEventListener('popstate', router);
     
-    // スレッド作成設定フォームの連動
     const newThreadForm = document.getElementById('new-thread-form');
     const writePermissionRadios = newThreadForm.querySelectorAll('input[name="write_permission"]');
     const nameSettingRadios = newThreadForm.querySelectorAll('input[name="name_setting"]');
@@ -649,12 +659,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const res = await fetch('/api/threads', { method: 'POST', headers, body: JSON.stringify({ genre, title: form.elements['new-thread-title'].value, author: form.elements['new-thread-author'].value, body: form.elements['new-thread-body'].value, write_permission, name_setting, fixed_name }) }); 
             if (!res.ok) await handleApiError(res); 
-            navigate(`/${genre}`); // スレッド一覧に遷移
+            navigate(`/${genre}`);
         } catch(err) { console.error(err); alert(err.message); } finally { btn.disabled = false; }
     });
     document.getElementById('new-post-form').addEventListener('submit', async (e) => {
         e.preventDefault(); const idToken = window.authState.idToken; const headers = { 'Content-Type': 'application/json' }; if (idToken) headers['Authorization'] = `Bearer ${idToken}`; const form = e.target, btn = form.querySelector('button'), threadId = form.elements['current-thread-id'].value; btn.disabled = true;
-        try { const res = await fetch(`/api/threads/${threadId}/posts`, { method: 'POST', headers, body: JSON.stringify({ author: form.elements['new-post-author'].value, body: form.elements['new-post-body'].value }) }); if (!res.ok) await handleApiError(res); form.reset(); if (window.authState.user) { const customName = localStorage.getItem('bbs_custom_username'); form.elements['new-post-author'].value = customName || window.authState.user.displayName; } await prepareThreadContentView(threadId); } catch(err) { console.error(err); alert(err.message); } finally { btn.disabled = false; }
+        try { const res = await fetch(`/api/threads/${threadId}/posts`, { method: 'POST', headers, body: JSON.stringify({ author: form.elements['new-post-author'].value, body: form.elements['new-post-body'].value }) }); if (!res.ok) await handleApiError(res); 
+            form.elements['new-post-body'].value = '';
+            await prepareThreadContentView(threadId); 
+        } catch(err) { console.error(err); alert(err.message); } finally { btn.disabled = false; }
     });
 
     // --- Initial Load ---
