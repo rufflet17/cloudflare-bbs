@@ -309,25 +309,51 @@ document.addEventListener('DOMContentLoaded', () => {
         currentState = { ...currentState, threadInfo, threadId, posts: [], loadedChunks: new Set() };
         document.getElementById('thread-title').textContent = threadInfo.title;
         document.getElementById('current-thread-id').value = threadInfo.id;
-        let initialPosts = [];
+        
+        let fetchedPosts = [];
+        
         if (jumpToPostNumber) {
             const targetChunk = Math.floor((jumpToPostNumber - 1) / CHUNK_SIZE);
-            const chunksNeeded = Math.ceil(POSTS_PER_PAGE / CHUNK_SIZE);
-            const endChunk = targetChunk + chunksNeeded - 1;
-            const chunksToFetch = Array.from({length: endChunk - targetChunk + 1}, (_, i) => targetChunk + i);
-            initialPosts = await fetchPostChunks(chunksToFetch);
-            const remainingPosts = threadInfo.post_count - ((endChunk + 1) * CHUNK_SIZE);
-            if (remainingPosts > 0) { postsLoader.insertAdjacentHTML('beforeend', `<button onclick="loadMorePosts(this, ${endChunk + 1})">続きから読む (${remainingPosts}レス)</button>`); }
+            const startChunk = Math.max(0, targetChunk - 1); // ターゲットの一つ前のチャンクから取得
+            const chunksNeededAfter = Math.ceil(POSTS_PER_PAGE / CHUNK_SIZE);
+            const endChunk = targetChunk + chunksNeededAfter - 1;
+            
+            const chunksToFetch = Array.from({length: endChunk - startChunk + 1}, (_, i) => startChunk + i)
+                .filter(cn => cn >= 0 && cn * CHUNK_SIZE < threadInfo.post_count);
+
+            const initialPosts = await fetchPostChunks(chunksToFetch);
+            
+            const allFetchedPosts = initialPosts.sort((a,b) => a.post_number - b.post_number);
+            const targetIndex = allFetchedPosts.findIndex(p => p.post_number === jumpToPostNumber);
+
+            if (targetIndex !== -1) {
+                const startIndex = Math.max(0, targetIndex - 50); // 前は最大50件
+                const endIndex = targetIndex + POSTS_PER_PAGE;
+                fetchedPosts = allFetchedPosts.slice(startIndex, endIndex);
+            } else {
+                fetchedPosts = allFetchedPosts;
+            }
+
+            const lastPostNumber = fetchedPosts[fetchedPosts.length - 1]?.post_number;
+            if (lastPostNumber && lastPostNumber < threadInfo.post_count) {
+                 const remainingPosts = threadInfo.post_count - lastPostNumber;
+                 const nextChunk = Math.floor(lastPostNumber / CHUNK_SIZE);
+                 postsLoader.insertAdjacentHTML('beforeend', `<button onclick="loadMorePosts(this, ${nextChunk})">続きから読む (${remainingPosts}レス)</button>`);
+            }
         } else {
             const latestChunk = Math.floor((threadInfo.post_count - 1) / CHUNK_SIZE);
             const chunksNeeded = Math.ceil(POSTS_PER_PAGE / CHUNK_SIZE);
             const startChunk = Math.max(0, latestChunk - chunksNeeded + 1);
             const chunksToFetch = Array.from({length: latestChunk - startChunk + 1}, (_, i) => startChunk + i);
-            initialPosts = await fetchPostChunks(chunksToFetch);
+            fetchedPosts = (await fetchPostChunks(chunksToFetch)).sort((a,b) => a.post_number - b.post_number);
         }
-        currentState.posts = initialPosts.sort((a,b) => a.post_number - b.post_number);
+        
+        currentState.posts = fetchedPosts;
         renderPosts(true);
-        if (jumpToPostNumber) { setTimeout(() => document.getElementById(`post-${jumpToPostNumber}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100); }
+        
+        if (jumpToPostNumber) { 
+            setTimeout(() => document.getElementById(`post-${jumpToPostNumber}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100); 
+        }
     };
     
     // --- Post Rendering & Loading ---
@@ -349,7 +375,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const isBookmarked = BookmarkManager.isBookmarked(currentState.threadId, post.post_number);
             if(isBookmarked) div.classList.add('bookmarked');
             const formattedDate = parseUTCDate(post.created_at)?.toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-            div.innerHTML = `<div class="post-header"><span class="post-header-main"><span class="post-number">${post.post_number}</span>: ${escapeHTML(post.author || '名無しさん')}<i class="bookmark-icon">${isBookmarked ? '🔖' : '📎'}</i></span><span class="post-date">${formattedDate}</span></div><div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>`;
+            div.innerHTML = `<div class="post-header"><span class="post-header-main"><span class="post-number">${post.post_number}</span>: ${escapeHTML(post.author || '名無しさん')}</span><span class="post-date">${formattedDate}</span></div><div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>`;
             div.querySelector('.post-header').addEventListener('click', (e) => {
                 e.stopPropagation();
                 const isNowBookmarked = BookmarkManager.toggle(currentState.threadId, currentState.threadInfo.title, post);
@@ -398,7 +424,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Bookmark Modal Logic ---
     const updateBookmarkStyle = (postNumber, isBookmarked) => {
         const postEl = document.getElementById(`post-${postNumber}`);
-        if(postEl) { postEl.querySelector('.bookmark-icon').textContent = isBookmarked ? '🔖' : '📎'; postEl.classList.toggle('bookmarked', isBookmarked); }
+        if(postEl) { postEl.classList.toggle('bookmarked', isBookmarked); }
     };
     window.openBookmarkModal = () => { prepareBookmarkView(null); bookmarkModal.style.display = 'flex'; };
     window.closeBookmarkModal = () => { bookmarkModal.style.display = 'none'; };
