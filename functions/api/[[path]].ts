@@ -13,6 +13,10 @@ interface Thread {
   post_count: number;
   last_updated: string;
   archived_chunk_count: number;
+  // 追加
+  write_permission: 'public' | 'authenticated';
+  name_setting: 'user_choice' | 'fixed' | 'account_linked';
+  fixed_name: string | null;
 }
 interface Post {
   id: number;
@@ -43,7 +47,7 @@ function normalizeUrl(url: string | URL): URL {
   return urlObj;
 }
 
-// --- JWT検証用のヘルパー関数群 ---
+// --- JWT検証用のヘルパー関数群 (変更なし) ---
 let googlePublicKeys: any[] | null = null;
 let keysFetchTime = 0;
 
@@ -117,7 +121,7 @@ async function verifyFirebaseToken(token: string, env: Env): Promise<DecodedToke
     }
 }
 
-// 2. メインハンドラ (リクエストのルーティング)
+// 2. メインハンドラ (リクエストのルーティング) (変更なし)
 // -----------------------------------------------------------------------------
 export const onRequest: PagesFunction<Env> = async (context) => {
   const { request, data, env } = context;
@@ -204,26 +208,29 @@ async function getThreads(context: EventContext<Env, any, any>): Promise<Respons
 
 async function getThreadInfo(context: EventContext<Env, any, any>, threadId: string): Promise<Response> {
     const { env } = context;
-    const threadInfo = await env.MY_D1_DATABASE2.prepare("SELECT id, title, genre, post_count FROM threads_meta WHERE id = ?").bind(threadId).first<Thread>();
+    const threadInfo = await env.MY_D1_DATABASE2.prepare("SELECT id, title, genre, post_count, write_permission, name_setting, fixed_name FROM threads_meta WHERE id = ?").bind(threadId).first<Thread>();
     if (!threadInfo) return new Response(JSON.stringify({ error: "Thread not found" }), { status: 404 });
     return new Response(JSON.stringify(threadInfo), { headers: { "Content-Type": "application/json", "Cache-Control": "no-cache, no-store, must-revalidate" } });
 }
 
-async function createThread(context: EventContext<Env, any, any>, body: { genre: string; title: string; author: string; body: string }): Promise<Response> {
+async function createThread(context: EventContext<Env, any, any>, body: { genre: string; title: string; author: string; body: string; write_permission: string; name_setting: string; fixed_name: string; }): Promise<Response> {
   const { env, waitUntil, data } = context;
-  const { genre, title, author, body: postBody } = body;
+  const { genre, title, author, body: postBody, write_permission, name_setting, fixed_name } = body;
   if (!genre || !title || !postBody) return new Response(JSON.stringify({ error: "Genre, title and body are required." }), { status: 400 });
+  if (name_setting === 'account_linked' && write_permission !== 'authenticated') {
+    return new Response(JSON.stringify({ error: "ログイン名強制使用は、ログインユーザーのみ書き込める設定の場合にのみ使用できます。"}), { status: 400 });
+  }
 
   const decodedToken = data.decodedToken as DecodedToken | undefined;
-  const authorName = decodedToken ? (decodedToken.name || '名無しさん') : (author || '名無しさん');
+  const authorName = decodedToken ? (author || decodedToken.name || '名無しさん') : (author || '名無しさん');
   const newThreadId = crypto.randomUUID();
 
   await env.MY_D1_DATABASE2.batch([
     env.MY_D1_DATABASE2.prepare("INSERT INTO threads (id, title) VALUES (?, ?)").bind(newThreadId, title),
     env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body) VALUES (?, 1, ?, ?)")
       .bind(newThreadId, authorName, postBody),
-    env.MY_D1_DATABASE2.prepare("INSERT INTO threads_meta (id, title, genre, post_count) VALUES (?, ?, ?, 1)")
-      .bind(newThreadId, title, genre)
+    env.MY_D1_DATABASE2.prepare("INSERT INTO threads_meta (id, title, genre, post_count, write_permission, name_setting, fixed_name) VALUES (?, ?, ?, 1, ?, ?, ?)")
+      .bind(newThreadId, title, genre, write_permission, name_setting, name_setting === 'fixed' ? fixed_name : null)
   ]);
   
   const cache = caches.default;
@@ -274,7 +281,29 @@ async function createPost(context: EventContext<Env, any, any>, threadId: string
   if (!postBody) return new Response(JSON.stringify({ error: "Body is required." }), { status: 400 });
 
   const decodedToken = data.decodedToken as DecodedToken | undefined;
-  const authorName = decodedToken ? (decodedToken.name || '名無しさん') : (author || '名無しさん');
+
+  const threadMeta = await env.MY_D1_DATABASE2.prepare("SELECT write_permission, name_setting, fixed_name FROM threads_meta WHERE id = ?").bind(threadId).first<Thread>();
+  if (!threadMeta) return new Response(JSON.stringify({ error: "Thread not found" }), { status: 404 });
+
+  // 1. 権限チェック
+  if (threadMeta.write_permission === 'authenticated' && !decodedToken) {
+    return new Response(JSON.stringify({ error: "このスレッドへの書き込みにはログインが必要です。" }), { status: 403 });
+  }
+
+  // 2. 名前の決定
+  let authorName: string;
+  switch (threadMeta.name_setting) {
+      case 'account_linked':
+          authorName = decodedToken!.name || '名無しさん';
+          break;
+      case 'fixed':
+          authorName = threadMeta.fixed_name || '名無しさん';
+          break;
+      case 'user_choice':
+      default:
+          authorName = author || '名無しさん';
+          break;
+  }
 
   const threadInfo = await env.MY_D1_DATABASE2.prepare("UPDATE threads_meta SET post_count = post_count + 1, last_updated = CURRENT_TIMESTAMP WHERE id = ? RETURNING post_count, archived_chunk_count, genre").bind(threadId).first<{ post_count: number, archived_chunk_count: number, genre: string }>();
   if (!threadInfo) throw new Error("Failed to update thread counters.");
@@ -300,6 +329,7 @@ async function createPost(context: EventContext<Env, any, any>, threadId: string
   return new Response(JSON.stringify({ new_post_count: newPostCount, latest_chunk_posts: latestChunkPosts }), { status: 201 });
 }
 
+// --- アーカイブ & キャッシュ無効化 (変更なし) ---
 async function archiveChunk(context: EventContext<Env, any, any>, threadId: string, chunkToArchive: number) {
     const { env, request } = context;
     try {

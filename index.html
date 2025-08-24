@@ -32,6 +32,10 @@
     button { padding: 10px; background-color: var(--link-color); color: white; border: none; cursor: pointer; border-radius: 4px; font-size: 1em; font-weight: bold; transition: background-color 0.2s; }
     button:hover { background-color: var(--link-hover-color); }
     button:disabled { background-color: #6c757d; cursor: not-allowed; }
+    fieldset { border: 1px solid var(--border-color); border-radius: 4px; padding: 15px; margin-bottom: 10px; }
+    legend { font-weight: bold; color: var(--text-color); padding: 0 5px; }
+    .fieldset-row { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
+    .fieldset-row label { display: flex; align-items: center; gap: 5px; }
     .theme-switcher { margin-bottom: 10px; text-align: right; }
     .theme-switcher button { padding: 5px 10px; font-size: 0.8em; margin-left: 5px; background-color: #ccc; color: #333; font-weight: normal; }
     .theme-switcher button.active { background-color: var(--link-color); color: white; }
@@ -95,6 +99,7 @@
         <button id="open-bookmarks-header" class="header-nav-btn" onclick="openBookmarkModal()">栞</button>
         <div id="auth-controls-header">
             <span id="user-display"></span>
+            <button id="change-name-btn" style="display:none;">名前変更</button>
             <button id="login-btn" onclick="login()">ログイン</button>
             <button id="logout-btn" onclick="logout()" style="display:none;">ログアウト</button>
         </div>
@@ -110,13 +115,52 @@
     <div id="home-view" class="view"><h2>ジャンル一覧</h2><div id="genre-list"></div></div>
     <div id="thread-list-view" class="view">
       <h2 id="thread-list-title"></h2>
-      <div id="thread-list"></div><hr><h3>新しいスレッドを立てる</h3>
-      <form id="new-thread-form"><input type="hidden" id="new-thread-genre"><input type="text" id="new-thread-title" placeholder="スレッドタイトル" required><input type="text" id="new-thread-author" placeholder="名前 (省略可)"><textarea id="new-thread-body" placeholder="最初の書き込み" rows="4" required></textarea><button type="submit">スレッド作成</button></form>
+      <div id="thread-list"></div><hr>
+      <button id="show-new-thread-form-btn">新しいスレッドを立てる</button>
+    </div>
+    <div id="new-thread-view" class="view">
+        <h2 id="new-thread-view-title">新しいスレッドを立てる</h2>
+        <form id="new-thread-form">
+            <input type="hidden" id="new-thread-genre">
+            <input type="text" id="new-thread-title" placeholder="スレッドタイトル" required>
+            <input type="text" id="new-thread-author" placeholder="あなたの名前 (省略可)">
+            <textarea id="new-thread-body" placeholder="最初の書き込み" rows="4" required></textarea>
+            
+            <fieldset>
+                <legend>書き込み設定</legend>
+                <div>
+                    <strong>誰が書き込めるか？</strong>
+                    <div class="fieldset-row">
+                        <label><input type="radio" name="write_permission" value="public" checked> 誰でも</label>
+                        <label><input type="radio" name="write_permission" value="authenticated"> ログインユーザーのみ</label>
+                    </div>
+                </div>
+                <hr style="border: none; border-top: 1px dotted var(--border-color); margin: 10px 0;">
+                <div>
+                    <strong>名前の扱い</strong>
+                    <div class="fieldset-row">
+                        <label><input type="radio" name="name_setting" value="user_choice" checked> 各ユーザーが自由に入力</label>
+                    </div>
+                    <div class="fieldset-row">
+                        <label><input type="radio" name="name_setting" value="fixed"> 全員固定:</label>
+                        <input type="text" id="fixed_name_input" placeholder="例: 名無しさん" style="flex-grow: 1; padding: 5px;" disabled>
+                    </div>
+                    <div class="fieldset-row">
+                        <label><input type="radio" name="name_setting" value="account_linked" disabled> ログイン名を強制使用</label>
+                    </div>
+                </div>
+            </fieldset>
+
+            <button type="submit">スレッド作成</button>
+        </form>
     </div>
     <div id="thread-content-view" class="view">
       <h2 id="thread-title"></h2>
-      <div id="posts-loader"></div><div id="posts-container"></div><hr><h3>レスを書き込む</h3>
-      <form id="new-post-form"><input type="hidden" id="current-thread-id"><input type="text" id="new-post-author" placeholder="名前 (省略可)"><textarea id="new-post-body" placeholder="書き込み内容" rows="4" required></textarea><button type="submit">書き込む</button></form>
+      <div id="posts-loader"></div><div id="posts-container"></div><hr>
+      <div id="new-post-form-container">
+        <h3>レスを書き込む</h3>
+        <form id="new-post-form"><input type="hidden" id="current-thread-id"><input type="text" id="new-post-author" placeholder="名前 (省略可)"><textarea id="new-post-body" placeholder="書き込み内容" rows="4" required></textarea><button type="submit">書き込む</button></form>
+      </div>
     </div>
   </main>
 
@@ -142,30 +186,66 @@
   const auth = getAuth(app);
   const provider = new GoogleAuthProvider();
   window.authState = { user: null, idToken: null };
+
+  const CUSTOM_NAME_KEY = 'bbs_custom_username';
+
+  function updateUserFields(user, customName) {
+      const name = customName || (user ? user.displayName : '');
+      const userDisplay = document.getElementById('user-display');
+      const newThreadAuthorInput = document.getElementById('new-thread-author');
+      const newPostAuthorInput = document.getElementById('new-post-author');
+
+      if (user) {
+          userDisplay.textContent = `${name} さん`;
+          if (newThreadAuthorInput) { newThreadAuthorInput.value = name; newThreadAuthorInput.readOnly = true; }
+          if (newPostAuthorInput) { newPostAuthorInput.value = name; newPostAuthorInput.readOnly = true; }
+      } else {
+          userDisplay.textContent = '';
+          if (newThreadAuthorInput) { newThreadAuthorInput.value = ''; newThreadAuthorInput.readOnly = false; newThreadAuthorInput.placeholder = "名前 (省略可)"; }
+          if (newPostAuthorInput) { newPostAuthorInput.value = ''; newPostAuthorInput.readOnly = false; newPostAuthorInput.placeholder = "名前 (省略可)"; }
+      }
+  }
+
   onAuthStateChanged(auth, async (user) => {
-    const userDisplay = document.getElementById('user-display');
     const loginBtn = document.getElementById('login-btn');
     const logoutBtn = document.getElementById('logout-btn');
-    const newThreadAuthorInput = document.getElementById('new-thread-author');
-    const newPostAuthorInput = document.getElementById('new-post-author');
+    const changeNameBtn = document.getElementById('change-name-btn');
+
     if (user) {
       window.authState.user = user;
       window.authState.idToken = await user.getIdToken(true);
-      userDisplay.textContent = `${user.displayName} さん`;
+      const customName = localStorage.getItem(CUSTOM_NAME_KEY);
+      updateUserFields(user, customName);
       loginBtn.style.display = 'none';
-      logoutBtn.style.display = 'inline';
-      if(newThreadAuthorInput) { newThreadAuthorInput.value = user.displayName; newThreadAuthorInput.readOnly = true; }
-      if(newPostAuthorInput) { newPostAuthorInput.value = user.displayName; newPostAuthorInput.readOnly = true; }
+      logoutBtn.style.display = 'inline-block';
+      changeNameBtn.style.display = 'inline-block';
     } else {
       window.authState.user = null;
       window.authState.idToken = null;
-      userDisplay.textContent = '';
-      loginBtn.style.display = 'inline';
+      updateUserFields(null, null);
+      loginBtn.style.display = 'inline-block';
       logoutBtn.style.display = 'none';
-      if(newThreadAuthorInput) { newThreadAuthorInput.value = ''; newThreadAuthorInput.readOnly = false; newThreadAuthorInput.placeholder = "名前 (省略可)"; }
-      if(newPostAuthorInput) { newPostAuthorInput.value = ''; newPostAuthorInput.readOnly = false; newPostAuthorInput.placeholder = "名前 (省略可)"; }
+      changeNameBtn.style.display = 'none';
     }
   });
+
+  document.getElementById('change-name-btn').addEventListener('click', () => {
+    const user = window.authState.user;
+    if (!user) return;
+    const currentCustomName = localStorage.getItem(CUSTOM_NAME_KEY) || '';
+    const newName = prompt('新しい名前を入力してください（空にするとGoogleアカウント名に戻ります）:', currentCustomName);
+
+    if (newName !== null) { // キャンセルされなかった場合
+        if (newName.trim() === '') {
+            localStorage.removeItem(CUSTOM_NAME_KEY);
+            updateUserFields(user, null);
+        } else {
+            localStorage.setItem(CUSTOM_NAME_KEY, newName);
+            updateUserFields(user, newName);
+        }
+    }
+  });
+
   window.login = async () => { try { await signInWithPopup(auth, provider); } catch (error) { console.error("ログインエラー:", error); } };
   window.logout = async () => { await signOut(auth); };
 </script>
@@ -180,7 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let isLoadingPosts = false;
 
     // --- DOM Elements ---
-    const views = { home: document.getElementById('home-view'), threadList: document.getElementById('thread-list-view'), threadContent: document.getElementById('thread-content-view') };
+    const views = { home: document.getElementById('home-view'), threadList: document.getElementById('thread-list-view'), newThread: document.getElementById('new-thread-view'), threadContent: document.getElementById('thread-content-view') };
     const genreListContainer = document.getElementById('genre-list');
     const threadListContainer = document.getElementById('thread-list');
     const postsContainer = document.getElementById('posts-container');
@@ -191,7 +271,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const backToThreadListBtnHeader = document.getElementById('back-to-thread-list-btn-header');
     const autoDeleteBookmarkCheckbox = document.getElementById('auto-delete-bookmark-checkbox');
     
-    // --- Bookmark Manager ---
+    // --- Bookmark Manager (変更なし) ---
     const BookmarkManager = {
         key: 'bbs_bookmarks',
         getAll: () => JSON.parse(localStorage.getItem(BookmarkManager.key) || '{}'),
@@ -225,7 +305,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // --- Bookmark Auto-Delete Option ---
+    // --- Bookmark Auto-Delete Option (変更なし) ---
     const AUTO_DELETE_KEY = 'bbs_auto_delete_bookmark';
     const initAutoDeleteOption = () => {
         const savedValue = localStorage.getItem(AUTO_DELETE_KEY) === 'true';
@@ -236,7 +316,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     initAutoDeleteOption();
 
-    // --- Theme Switcher ---
+    // --- Theme Switcher (変更なし) ---
     const themeSwitcher = document.querySelector('.theme-switcher');
     const themeButtons = themeSwitcher.querySelectorAll('button');
     const applyTheme = (theme) => {
@@ -247,7 +327,7 @@ document.addEventListener('DOMContentLoaded', () => {
     themeSwitcher.addEventListener('click', (e) => (e.target.tagName === 'BUTTON') && applyTheme(e.target.dataset.theme));
     applyTheme(localStorage.getItem('theme') || 'classic');
 
-    // --- Helper Functions ---
+    // --- Helper Functions (変更なし) ---
     const escapeHTML = (str) => str.replace(/[&<>"']/g, (match) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[match]));
     async function handleApiError(response) { try { const d = await response.json(); throw new Error(d.error || '不明なエラー'); } catch (e) { throw new Error('サーバー通信失敗'); } }
     const parseUTCDate = (dateString) => dateString ? new Date(dateString.replace(' ', 'T') + 'Z') : null;
@@ -256,13 +336,15 @@ document.addEventListener('DOMContentLoaded', () => {
     window.navigate = (path) => { history.pushState(null, '', path); router(); };
     const parsePath = () => {
         const parts = window.location.pathname.split('/').filter(p => p);
+        if (parts[0] === 'new' && parts.length === 2) return { view: 'newThread', genre: parts[1] };
         if (parts.length === 2) return { view: 'threadContent', genre: parts[0], threadId: parts[1] };
         if (parts.length === 1) return { view: 'threadList', genre: parts[0] };
         return { view: 'home' };
     };
     const updateHeaderButtons = (view) => {
         backToHomeBtnHeader.style.display = (view === 'threadList') ? 'inline-block' : 'none';
-        backToThreadListBtnHeader.style.display = (view === 'threadContent') ? 'inline-block' : 'none';
+        const showBackToThreadList = view === 'threadContent' || view === 'newThread';
+        backToThreadListBtnHeader.style.display = showBackToThreadList ? 'inline-block' : 'none';
     };
     const router = async () => {
         const route = parsePath();
@@ -274,6 +356,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             switch (route.view) {
                 case 'threadContent': await prepareThreadContentView(route.threadId, jumpToPostNumber); nextView = views.threadContent; break;
+                case 'newThread': prepareNewThreadView(route.genre); nextView = views.newThread; break;
                 case 'threadList': await prepareThreadListView(route.genre); nextView = views.threadList; break;
                 default: await prepareHomeView(); nextView = views.home; break;
             }
@@ -296,10 +379,64 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!res.ok) await handleApiError(res);
         const threads = await res.json();
         document.getElementById('thread-list-title').textContent = `${escapeHTML(genre)} のスレッド一覧`;
-        document.getElementById('new-thread-genre').value = genre;
+        document.getElementById('show-new-thread-form-btn').onclick = () => navigate(`/new/${genre}`);
         threadListContainer.innerHTML = '';
         if (threads && threads.length > 0) { threads.forEach(thread => { const a = document.createElement('a'); a.href = `/${genre}/${thread.id}`; a.className = 'thread-item'; const lastUpdatedDate = parseUTCDate(thread.last_updated); const formattedDate = lastUpdatedDate.toLocaleString('ja-JP', { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); a.innerHTML = `<div class="thread-details"><strong>${escapeHTML(thread.title)}</strong></div><div class="thread-meta">レス: ${thread.post_count}<br>更新: ${formattedDate}</div>`; a.onclick = (e) => { e.preventDefault(); navigate(`/${genre}/${thread.id}`); }; threadListContainer.appendChild(a); }); } else { threadListContainer.innerHTML = '<p>スレッドはまだありません。</p>'; }
     };
+    
+    const prepareNewThreadView = (genre) => {
+        document.getElementById('new-thread-view-title').textContent = `新しいスレッドを立てる (${escapeHTML(genre)})`;
+        const form = document.getElementById('new-thread-form');
+        form.reset();
+        document.getElementById('new-thread-genre').value = genre;
+        // ログイン状態に応じて名前欄を再設定
+        const customName = localStorage.getItem('bbs_custom_username');
+        if (window.authState.user) {
+            const authorInput = document.getElementById('new-thread-author');
+            authorInput.value = customName || window.authState.user.displayName;
+            authorInput.readOnly = true;
+        }
+    };
+
+    const updatePostFormControls = (threadInfo) => {
+        const formContainer = document.getElementById('new-post-form-container');
+        const form = document.getElementById('new-post-form');
+        const authorInput = document.getElementById('new-post-author');
+        const bodyInput = document.getElementById('new-post-body');
+        const submitBtn = form.querySelector('button');
+
+        // デフォルト表示
+        formContainer.style.display = 'block';
+        authorInput.disabled = false;
+        bodyInput.disabled = false;
+        submitBtn.disabled = false;
+        submitBtn.textContent = '書き込む';
+        authorInput.placeholder = "名前 (省略可)";
+        
+        if (threadInfo.write_permission === 'authenticated' && !window.authState.user) {
+            formContainer.style.display = 'none'; // ログインしてないとフォームごと非表示
+            return;
+        }
+
+        switch (threadInfo.name_setting) {
+            case 'fixed':
+                authorInput.value = threadInfo.fixed_name || '名無しさん';
+                authorInput.disabled = true;
+                break;
+            case 'account_linked':
+                authorInput.value = window.authState.user?.displayName || '名無しさん';
+                authorInput.disabled = true;
+                break;
+            case 'user_choice':
+            default:
+                authorInput.disabled = !!window.authState.user; // ログインユーザーは名前変更不可
+                if (!window.authState.user) {
+                    authorInput.value = '';
+                }
+                break;
+        }
+    };
+
     const prepareThreadContentView = async (threadId, jumpToPostNumber = null) => {
         postsContainer.innerHTML = '読み込み中...';
         postsLoader.innerHTML = '';
@@ -310,6 +447,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('thread-title').textContent = threadInfo.title;
         document.getElementById('current-thread-id').value = threadInfo.id;
         
+        updatePostFormControls(threadInfo);
+
         let fetchedPosts = [];
         
         if (jumpToPostNumber) {
@@ -356,7 +495,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     
-    // --- Post Rendering & Loading ---
+    // --- Post Rendering & Loading (変更なし) ---
     const fetchPostChunks = async (chunkNumbers) => {
         const chunksToFetch = chunkNumbers.filter(cn => !currentState.loadedChunks.has(cn));
         if (chunksToFetch.length === 0) return [];
@@ -421,7 +560,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch(error) { console.error(error); button.textContent = '読み込み失敗'; } finally { isLoadingPosts = false; }
     };
     
-    // --- Bookmark Modal Logic ---
+    // --- Bookmark Modal Logic (変更なし) ---
     const updateBookmarkStyle = (postNumber, isBookmarked) => {
         const postEl = document.getElementById(`post-${postNumber}`);
         if(postEl) { postEl.classList.toggle('bookmarked', isBookmarked); }
@@ -475,13 +614,47 @@ document.addEventListener('DOMContentLoaded', () => {
     backToHomeBtnHeader.onclick = () => navigate('/');
     backToThreadListBtnHeader.onclick = () => navigate(`/${currentState.genre}`);
     window.addEventListener('popstate', router);
+    
+    // スレッド作成設定フォームの連動
+    const newThreadForm = document.getElementById('new-thread-form');
+    const writePermissionRadios = newThreadForm.querySelectorAll('input[name="write_permission"]');
+    const nameSettingRadios = newThreadForm.querySelectorAll('input[name="name_setting"]');
+    const fixedNameInput = document.getElementById('fixed_name_input');
+    const accountLinkedRadio = newThreadForm.querySelector('input[value="account_linked"]');
+
+    writePermissionRadios.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            if (e.target.value === 'authenticated') {
+                accountLinkedRadio.disabled = false;
+            } else {
+                accountLinkedRadio.disabled = true;
+                if (accountLinkedRadio.checked) {
+                    newThreadForm.querySelector('input[value="user_choice"]').checked = true;
+                }
+            }
+        });
+    });
+    nameSettingRadios.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            fixedNameInput.disabled = (e.target.value !== 'fixed');
+        });
+    });
+
     document.getElementById('new-thread-form').addEventListener('submit', async (e) => {
         e.preventDefault(); const idToken = window.authState.idToken; const headers = { 'Content-Type': 'application/json' }; if (idToken) headers['Authorization'] = `Bearer ${idToken}`; const form = e.target, btn = form.querySelector('button'), genre = form.elements['new-thread-genre'].value; btn.disabled = true;
-        try { const res = await fetch('/api/threads', { method: 'POST', headers, body: JSON.stringify({ genre, title: form.elements['new-thread-title'].value, author: form.elements['new-thread-author'].value, body: form.elements['new-thread-body'].value }) }); if (!res.ok) await handleApiError(res); form.reset(); if (window.authState.user) form.elements['new-thread-author'].value = window.authState.user.displayName; await prepareThreadListView(genre); } catch(err) { console.error(err); alert(err.message); } finally { btn.disabled = false; }
+        try { 
+            const write_permission = form.elements['write_permission'].value;
+            const name_setting = form.elements['name_setting'].value;
+            const fixed_name = form.elements['fixed_name_input'].value;
+
+            const res = await fetch('/api/threads', { method: 'POST', headers, body: JSON.stringify({ genre, title: form.elements['new-thread-title'].value, author: form.elements['new-thread-author'].value, body: form.elements['new-thread-body'].value, write_permission, name_setting, fixed_name }) }); 
+            if (!res.ok) await handleApiError(res); 
+            navigate(`/${genre}`); // スレッド一覧に遷移
+        } catch(err) { console.error(err); alert(err.message); } finally { btn.disabled = false; }
     });
     document.getElementById('new-post-form').addEventListener('submit', async (e) => {
         e.preventDefault(); const idToken = window.authState.idToken; const headers = { 'Content-Type': 'application/json' }; if (idToken) headers['Authorization'] = `Bearer ${idToken}`; const form = e.target, btn = form.querySelector('button'), threadId = form.elements['current-thread-id'].value; btn.disabled = true;
-        try { const res = await fetch(`/api/threads/${threadId}/posts`, { method: 'POST', headers, body: JSON.stringify({ author: form.elements['new-post-author'].value, body: form.elements['new-post-body'].value }) }); if (!res.ok) await handleApiError(res); form.reset(); if (window.authState.user) form.elements['new-post-author'].value = window.authState.user.displayName; await prepareThreadContentView(threadId); } catch(err) { console.error(err); alert(err.message); } finally { btn.disabled = false; }
+        try { const res = await fetch(`/api/threads/${threadId}/posts`, { method: 'POST', headers, body: JSON.stringify({ author: form.elements['new-post-author'].value, body: form.elements['new-post-body'].value }) }); if (!res.ok) await handleApiError(res); form.reset(); if (window.authState.user) { const customName = localStorage.getItem('bbs_custom_username'); form.elements['new-post-author'].value = customName || window.authState.user.displayName; } await prepareThreadContentView(threadId); } catch(err) { console.error(err); alert(err.message); } finally { btn.disabled = false; }
     });
 
     // --- Initial Load ---
