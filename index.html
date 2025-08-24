@@ -189,6 +189,7 @@
 
   const CUSTOM_NAME_KEY = 'bbs_custom_username';
 
+  // ★★★ 修正箇所 ★★★
   function updateUserFields(user, customName) {
       const name = customName || (user ? user.displayName : '');
       const userDisplay = document.getElementById('user-display');
@@ -196,11 +197,18 @@
       
       if (user) {
           userDisplay.textContent = `${name} さん`;
-          // スレッド作成時の名前欄は、ログインユーザーは編集不可とする
-          if (newThreadAuthorInput) { newThreadAuthorInput.value = name; newThreadAuthorInput.readOnly = true; }
+          // スレッド作成時、ログインユーザーは名前を編集できるようにする
+          if (newThreadAuthorInput) {
+              newThreadAuthorInput.value = name;
+              newThreadAuthorInput.readOnly = false; // ★ 編集可能にする
+          }
       } else {
           userDisplay.textContent = '';
-          if (newThreadAuthorInput) { newThreadAuthorInput.value = ''; newThreadAuthorInput.readOnly = false; newThreadAuthorInput.placeholder = "名前 (省略可)"; }
+          if (newThreadAuthorInput) {
+              newThreadAuthorInput.value = '';
+              newThreadAuthorInput.readOnly = false;
+              newThreadAuthorInput.placeholder = "名前 (省略可)";
+          }
       }
   }
 
@@ -394,15 +402,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const form = document.getElementById('new-thread-form');
         form.reset();
         document.getElementById('new-thread-genre').value = genre;
-        const customName = localStorage.getItem('bbs_custom_username');
-        if (window.authState.user) {
-            const authorInput = document.getElementById('new-thread-author');
-            authorInput.value = customName || window.authState.user.displayName;
-            authorInput.readOnly = true;
-        }
+        // ログイン状態に応じて名前欄を再設定する処理は onAuthStateChanged 内の updateUserFields で行われる
     };
 
-    // ★★★ 修正箇所 ★★★
     window.updatePostFormControls = (threadInfo) => {
         const formContainer = document.getElementById('new-post-form-container');
         const form = document.getElementById('new-post-form');
@@ -435,13 +437,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 break;
             case 'user_choice':
             default:
-                authorInput.disabled = false; // ★ 常に編集可能にする
+                authorInput.disabled = false;
                 if (window.authState.user) {
-                    // ログインユーザーにはデフォルト名を設定するが、編集は自由にできる
                     const customName = localStorage.getItem('bbs_custom_username');
                     authorInput.value = customName || window.authState.user.displayName;
                 } else {
-                    // ログインしていないユーザーは空欄から入力
                     authorInput.value = '';
                 }
                 break;
