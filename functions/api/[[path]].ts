@@ -4,6 +4,9 @@ interface Env {
   MY_D1_DATABASE2: D1Database;
   MY_R2_BUCKET2: R2Bucket;
   FIREBASE_PROJECT_ID: string;
+  SALT_BASIC: string;
+  SALT_IP: string;
+  SALT_ACCOUNT: string;
 }
 
 interface Thread {
@@ -13,7 +16,6 @@ interface Thread {
   post_count: number;
   last_updated: string;
   archived_chunk_count: number;
-  // 追加
   write_permission: 'public' | 'authenticated';
   name_setting: 'user_choice' | 'fixed' | 'account_linked';
   fixed_name: string | null;
@@ -25,6 +27,11 @@ interface Post {
   author: string;
   body: string;
   created_at: string;
+  // ★★★ 修正箇所 ★★★
+  basic_id: number;
+  ip_thread_id: number;
+  account_thread_id: number | null;
+  id_suffix: string | null;
 }
 // JWTのペイロードの型定義
 interface DecodedToken {
@@ -45,6 +52,62 @@ function normalizeUrl(url: string | URL): URL {
     urlObj.pathname = urlObj.pathname.slice(0, -1);
   }
   return urlObj;
+}
+
+// ★★★ 修正箇所（ID生成関連のヘルパー関数を追加） ★★★
+// --- ID生成ヘルパー関数群 ---
+async function sha256(str: string): Promise<ArrayBuffer> {
+    const data = new TextEncoder().encode(str);
+    return crypto.subtle.digest('SHA-256', data);
+}
+
+function bufferToBigInt(buffer: ArrayBuffer): bigint {
+    const view = new DataView(buffer);
+    let result = 0n;
+    for (let i = 0; i < view.byteLength; i++) {
+        result = (result << 8n) | BigInt(view.getUint8(i));
+    }
+    return result;
+}
+
+function truncateBigInt(val: bigint, bits: number): bigint {
+    const mask = (1n << BigInt(bits)) - 1n;
+    return val & mask;
+}
+
+function numberToBase64(num: bigint, bytes: number): string {
+    let hex = num.toString(16).padStart(bytes * 2, '0');
+    const buffer = [];
+    for (let i = 0; i < hex.length; i += 2) {
+        buffer.push(parseInt(hex.substr(i, 2), 16));
+    }
+    const binaryString = String.fromCharCode(...buffer);
+    return btoa(binaryString).replace(/\+/g, '-').replace(/\//g, '_').slice(0, 8);
+}
+
+const ispMap: { [key: string]: string } = {
+    'NTT DOCOMO': 'd',
+    'KDDI': 'a',
+    'SOFTBANK': 'p',
+    'RAKUTEN': 'r',
+    'OPEN COMPUTER NETWORK': 'o', // OCN
+    'INTERNET INITIATIVE JAPAN': 'i', // IIJ
+    'GOOGLE': 'g',
+    'AMAZON': 'm',
+    'MICROSOFT': 's',
+    'CLOUDFLARE': 'c',
+};
+
+function getIspSuffix(request: Request): string {
+    const cf = (request as any).cf;
+    if (!cf || !cf.asOrganization) return '';
+    const org = cf.asOrganization.toUpperCase();
+    for (const key in ispMap) {
+        if (org.includes(key)) {
+            return ispMap[key];
+        }
+    }
+    return '';
 }
 
 // --- JWT検証用のヘルパー関数群 (変更なし) ---
@@ -214,7 +277,7 @@ async function getThreadInfo(context: EventContext<Env, any, any>, threadId: str
 }
 
 async function createThread(context: EventContext<Env, any, any>, body: { genre: string; title: string; author: string; body: string; write_permission: string; name_setting: string; fixed_name: string; }): Promise<Response> {
-  const { env, waitUntil, data } = context;
+  const { env, waitUntil, data, request } = context; // ★★★ requestを追加
   const { genre, title, author, body: postBody, write_permission, name_setting, fixed_name } = body;
   if (!genre || !title || !postBody) return new Response(JSON.stringify({ error: "Genre, title and body are required." }), { status: 400 });
   if (name_setting === 'account_linked' && write_permission !== 'authenticated') {
@@ -225,10 +288,22 @@ async function createThread(context: EventContext<Env, any, any>, body: { genre:
   const authorName = decodedToken ? (author || decodedToken.name || '名無しさん') : (author || '名無しさん');
   const newThreadId = crypto.randomUUID();
 
+  // ★★★ 修正箇所（最初の投稿にもIDを付与） ★★★
+  const ip = request.headers.get('CF-Connecting-IP') || '127.0.0.1';
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const ispSuffix = getIspSuffix(request);
+
+  const basicIdBigInt = truncateBigInt(bufferToBigInt(await sha256(ip + dateStr + env.SALT_BASIC)), 48);
+  const ipThreadIdBigInt = truncateBigInt(bufferToBigInt(await sha256(ip + newThreadId + env.SALT_IP)), 64);
+  let accountThreadIdBigInt: bigint | null = null;
+  if (decodedToken) {
+      accountThreadIdBigInt = truncateBigInt(bufferToBigInt(await sha256(decodedToken.user_id + newThreadId + env.SALT_ACCOUNT)), 64);
+  }
+
   await env.MY_D1_DATABASE2.batch([
     env.MY_D1_DATABASE2.prepare("INSERT INTO threads (id, title) VALUES (?, ?)").bind(newThreadId, title),
-    env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body) VALUES (?, 1, ?, ?)")
-      .bind(newThreadId, authorName, postBody),
+    env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body, basic_id, ip_thread_id, account_thread_id, id_suffix) VALUES (?, 1, ?, ?, ?, ?, ?, ?)")
+      .bind(newThreadId, authorName, postBody, Number(basicIdBigInt), Number(ipThreadIdBigInt), accountThreadIdBigInt ? Number(accountThreadIdBigInt) : null, ispSuffix),
     env.MY_D1_DATABASE2.prepare("INSERT INTO threads_meta (id, title, genre, post_count, write_permission, name_setting, fixed_name) VALUES (?, ?, ?, 1, ?, ?, ?)")
       .bind(newThreadId, title, genre, write_permission, name_setting, name_setting === 'fixed' ? fixed_name : null)
   ]);
@@ -268,7 +343,19 @@ async function getPostsForThread(context: EventContext<Env, any, any>, threadId:
     const { results } = await env.MY_D1_DATABASE2.prepare("SELECT * FROM posts WHERE thread_id = ? ORDER BY post_number ASC LIMIT ? OFFSET ?").bind(threadId, CHUNK_SIZE, d1Offset).all<Post>();
     posts = results;
   }
-  const response = new Response(JSON.stringify(posts ?? []), { headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=0, s-maxage=${sMaxAge}, must-revalidate` } });
+  
+  // ★★★ 修正箇所（IDをフロントエンド用の表示形式に変換） ★★★
+  const processedPosts = posts?.map(p => {
+    const base64Id = numberToBase64(BigInt(p.basic_id), 6); // 48bit = 6bytes
+    return {
+      ...p,
+      basic_id_display: `ID:${base64Id}${p.id_suffix || ''}`,
+      basic_id: undefined, // フロントに不要なデータは送らない
+      id_suffix: undefined,
+    };
+  }) ?? [];
+
+  const response = new Response(JSON.stringify(processedPosts), { headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=0, s-maxage=${sMaxAge}, must-revalidate` } });
   if (posts && posts.length > 0) {
     waitUntil(cache.put(cacheKey, response.clone()));
   }
@@ -285,12 +372,10 @@ async function createPost(context: EventContext<Env, any, any>, threadId: string
   const threadMeta = await env.MY_D1_DATABASE2.prepare("SELECT write_permission, name_setting, fixed_name FROM threads_meta WHERE id = ?").bind(threadId).first<Thread>();
   if (!threadMeta) return new Response(JSON.stringify({ error: "Thread not found" }), { status: 404 });
 
-  // 1. 権限チェック
   if (threadMeta.write_permission === 'authenticated' && !decodedToken) {
     return new Response(JSON.stringify({ error: "このスレッドへの書き込みにはログインが必要です。" }), { status: 403 });
   }
 
-  // 2. 名前の決定
   let authorName: string;
   switch (threadMeta.name_setting) {
       case 'account_linked':
@@ -304,12 +389,24 @@ async function createPost(context: EventContext<Env, any, any>, threadId: string
           authorName = author || '名無しさん';
           break;
   }
+  
+  // ★★★ 修正箇所（ID生成ロジック） ★★★
+  const ip = request.headers.get('CF-Connecting-IP') || '127.0.0.1';
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const ispSuffix = getIspSuffix(request);
+
+  const basicIdBigInt = truncateBigInt(bufferToBigInt(await sha256(ip + dateStr + env.SALT_BASIC)), 48);
+  const ipThreadIdBigInt = truncateBigInt(bufferToBigInt(await sha256(ip + threadId + env.SALT_IP)), 64);
+  let accountThreadIdBigInt: bigint | null = null;
+  if (decodedToken) {
+      accountThreadIdBigInt = truncateBigInt(bufferToBigInt(await sha256(decodedToken.user_id + threadId + env.SALT_ACCOUNT)), 64);
+  }
 
   const threadInfo = await env.MY_D1_DATABASE2.prepare("UPDATE threads_meta SET post_count = post_count + 1, last_updated = CURRENT_TIMESTAMP WHERE id = ? RETURNING post_count, archived_chunk_count, genre").bind(threadId).first<{ post_count: number, archived_chunk_count: number, genre: string }>();
   if (!threadInfo) throw new Error("Failed to update thread counters.");
   const newPostCount = threadInfo.post_count;
-  await env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body) VALUES (?, ?, ?, ?)")
-    .bind(threadId, newPostCount, authorName, postBody).run();
+  await env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body, basic_id, ip_thread_id, account_thread_id, id_suffix) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(threadId, newPostCount, authorName, postBody, Number(basicIdBigInt), Number(ipThreadIdBigInt), accountThreadIdBigInt ? Number(accountThreadIdBigInt) : null, ispSuffix).run();
 
   const d1PostCount = newPostCount - (threadInfo.archived_chunk_count * CHUNK_SIZE);
   if (d1PostCount > CHUNK_SIZE) {

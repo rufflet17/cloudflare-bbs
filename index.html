@@ -45,10 +45,11 @@
     .thread-meta { font-size: 0.8em; color: #666; text-align: right; white-space: nowrap; }
     .post { margin-bottom: 15px; padding-left: 10px; border-left: 3px solid var(--post-border-color); transition: background-color 0.2s, border-color 0.2s; }
     .post-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.9em; color: var(--post-name-color); font-weight: bold; cursor: pointer; }
-    .post-header-main { display: flex; align-items: center; }
-    .post-header .post-date { color: var(--post-meta-color); font-weight: normal; margin-left: 10px; }
+    .post-header-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .post-header .post-date { color: var(--post-meta-color); font-weight: normal; margin-left: auto; }
     .post-body { margin-left: 1em; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
     .post-number { text-decoration: underline; }
+    .post-id { font-weight: normal; color: var(--post-meta-color); }
     .bookmark-icon { margin-left: 5px; color: var(--accent-color); font-style: normal; }
     .post.bookmarked { background-color: var(--thread-hover-bg); border-left-color: var(--accent-color); }
     body[data-theme="modern"] .post { border-left: none; padding: 15px; background-color: var(--bg-color); border: 1px solid var(--border-color); border-radius: 6px; }
@@ -189,7 +190,7 @@
 
   const CUSTOM_NAME_KEY = 'bbs_custom_username';
 
-  // ★★★ 修正箇所 ★★★
+  // ★★★ 修正箇所 ★★★ (ユーザー名編集機能。ID表示とは無関係だが元のコードから維持)
   function updateUserFields(user, customName) {
       const name = customName || (user ? user.displayName : '');
       const userDisplay = document.getElementById('user-display');
@@ -506,7 +507,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     
-    // --- Post Rendering & Loading (変更なし) ---
+    // ★★★ 修正箇所（Post Rendering & Loading） ★★★
     const fetchPostChunks = async (chunkNumbers) => {
         const chunksToFetch = chunkNumbers.filter(cn => !window.currentState.loadedChunks.has(cn));
         if (chunksToFetch.length === 0) return [];
@@ -522,10 +523,26 @@ document.addEventListener('DOMContentLoaded', () => {
             const div = document.createElement('div');
             div.className = 'post';
             div.id = `post-${post.post_number}`;
+            // ★★★ 修正箇所（内部IDをdatasetに格納） ★★★
+            if (post.ip_thread_id) div.dataset.ipThreadId = post.ip_thread_id;
+            if (post.account_thread_id) div.dataset.accountThreadId = post.account_thread_id;
+
             const isBookmarked = BookmarkManager.isBookmarked(window.currentState.threadId, post.post_number);
             if(isBookmarked) div.classList.add('bookmarked');
             const formattedDate = parseUTCDate(post.created_at)?.toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-            div.innerHTML = `<div class="post-header"><span class="post-header-main"><span class="post-number">${post.post_number}</span>: ${escapeHTML(post.author || '名無しさん')}</span><span class="post-date">${formattedDate}</span></div><div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>`;
+            
+            // ★★★ 修正箇所（ID表示を追加） ★★★
+            div.innerHTML = `
+                <div class="post-header">
+                    <div class="post-header-main">
+                        <span><span class="post-number">${post.post_number}</span>: ${escapeHTML(post.author || '名無しさん')}</span>
+                        <span class="post-id">${post.basic_id_display || ''}</span>
+                    </div>
+                    <span class="post-date">${formattedDate}</span>
+                </div>
+                <div class="post-body">${escapeHTML(post.body).replace(/\n/g, '<br>')}</div>
+            `;
+
             div.querySelector('.post-header').addEventListener('click', (e) => {
                 e.stopPropagation();
                 const isNowBookmarked = BookmarkManager.toggle(window.currentState.threadId, window.currentState.threadInfo.title, post);
