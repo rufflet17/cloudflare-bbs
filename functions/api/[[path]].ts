@@ -27,7 +27,6 @@ interface Post {
   author: string;
   body: string;
   created_at: string;
-  // ★★★ 修正箇所 ★★★
   basic_id: number;
   ip_thread_id: number;
   account_thread_id: number | null;
@@ -54,7 +53,6 @@ function normalizeUrl(url: string | URL): URL {
   return urlObj;
 }
 
-// ★★★ 修正箇所（ID生成関連のヘルパー関数を追加） ★★★
 // --- ID生成ヘルパー関数群 ---
 async function sha256(str: string): Promise<ArrayBuffer> {
     const data = new TextEncoder().encode(str);
@@ -77,12 +75,21 @@ function truncateBigInt(val: bigint, bits: number): bigint {
 
 function numberToBase64(num: bigint, bytes: number): string {
     let hex = num.toString(16).padStart(bytes * 2, '0');
+    if (hex.length > bytes * 2) {
+        hex = hex.slice(hex.length - bytes * 2);
+    }
     const buffer = [];
     for (let i = 0; i < hex.length; i += 2) {
         buffer.push(parseInt(hex.substr(i, 2), 16));
     }
     const binaryString = String.fromCharCode(...buffer);
-    return btoa(binaryString).replace(/\+/g, '-').replace(/\//g, '_').slice(0, 8);
+    
+    const base64 = btoa(binaryString)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+        
+    return base64.slice(0, 8); // 8文字に切り出す
 }
 
 const ispMap: { [key: string]: string } = {
@@ -169,7 +176,7 @@ async function verifyFirebaseToken(token: string, env: Env): Promise<DecodedToke
         const jwk = jwks.find(key => key.kid === header.kid);
         if (!jwk) throw new Error('Public key not found for kid: ' + header.kid);
 
-        const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+        const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-26' }, false, ['verify']);
         
         const signature = str2ab(base64UrlDecode(signatureB64));
         const data = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
@@ -184,10 +191,21 @@ async function verifyFirebaseToken(token: string, env: Env): Promise<DecodedToke
     }
 }
 
-// 2. メインハンドラ (リクエストのルーティング) (変更なし)
+// 2. メインハンドラ (リクエストのルーティング)
 // -----------------------------------------------------------------------------
 export const onRequest: PagesFunction<Env> = async (context) => {
   const { request, data, env } = context;
+
+  // ★★★ 修正箇所 ★★★
+  // 必要な環境変数が設定されているかチェック
+  if (!env.SALT_BASIC || !env.SALT_IP || !env.SALT_ACCOUNT) {
+    console.error("CRITICAL: Salt environment variables are not set!");
+    return new Response(
+      JSON.stringify({ error: "Server configuration error. Service is unavailable." }),
+      { status: 503, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method;
@@ -277,7 +295,7 @@ async function getThreadInfo(context: EventContext<Env, any, any>, threadId: str
 }
 
 async function createThread(context: EventContext<Env, any, any>, body: { genre: string; title: string; author: string; body: string; write_permission: string; name_setting: string; fixed_name: string; }): Promise<Response> {
-  const { env, waitUntil, data, request } = context; // ★★★ requestを追加
+  const { env, waitUntil, data, request } = context;
   const { genre, title, author, body: postBody, write_permission, name_setting, fixed_name } = body;
   if (!genre || !title || !postBody) return new Response(JSON.stringify({ error: "Genre, title and body are required." }), { status: 400 });
   if (name_setting === 'account_linked' && write_permission !== 'authenticated') {
@@ -288,7 +306,6 @@ async function createThread(context: EventContext<Env, any, any>, body: { genre:
   const authorName = decodedToken ? (author || decodedToken.name || '名無しさん') : (author || '名無しさん');
   const newThreadId = crypto.randomUUID();
 
-  // ★★★ 修正箇所（最初の投稿にもIDを付与） ★★★
   const ip = request.headers.get('CF-Connecting-IP') || '127.0.0.1';
   const dateStr = new Date().toISOString().slice(0, 10);
   const ispSuffix = getIspSuffix(request);
@@ -344,12 +361,13 @@ async function getPostsForThread(context: EventContext<Env, any, any>, threadId:
     posts = results;
   }
   
-  // ★★★ 修正箇所（IDをフロントエンド用の表示形式に変換） ★★★
+  // ★★★ 修正箇所 ★★★
   const processedPosts = posts?.map(p => {
     const base64Id = numberToBase64(BigInt(p.basic_id), 6); // 48bit = 6bytes
     return {
       ...p,
-      basic_id_display: `ID:${base64Id}${p.id_suffix || ''}`,
+      // basic_id_display: `ID:${base64Id}${p.id_suffix || ''}`, // 末尾文字を付けないように変更
+      basic_id_display: `ID:${base64Id}`,
       basic_id: undefined, // フロントに不要なデータは送らない
       id_suffix: undefined,
     };
@@ -390,7 +408,6 @@ async function createPost(context: EventContext<Env, any, any>, threadId: string
           break;
   }
   
-  // ★★★ 修正箇所（ID生成ロジック） ★★★
   const ip = request.headers.get('CF-Connecting-IP') || '127.0.0.1';
   const dateStr = new Date().toISOString().slice(0, 10);
   const ispSuffix = getIspSuffix(request);
