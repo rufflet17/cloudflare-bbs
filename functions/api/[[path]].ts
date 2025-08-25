@@ -30,7 +30,7 @@ interface Post {
   basic_id: number;
   ip_thread_id: number;
   account_thread_id: number | null;
-  id_suffix: string | null;
+  // id_suffix: string | null; // ★★★ 修正箇所: 不要なためコメントアウトまたは削除
 }
 // JWTのペイロードの型定義
 interface DecodedToken {
@@ -92,30 +92,7 @@ function numberToBase64(num: bigint, bytes: number): string {
     return base64.slice(0, 8); // 8文字に切り出す
 }
 
-const ispMap: { [key: string]: string } = {
-    'NTT DOCOMO': 'd',
-    'KDDI': 'a',
-    'SOFTBANK': 'p',
-    'RAKUTEN': 'r',
-    'OPEN COMPUTER NETWORK': 'o', // OCN
-    'INTERNET INITIATIVE JAPAN': 'i', // IIJ
-    'GOOGLE': 'g',
-    'AMAZON': 'm',
-    'MICROSOFT': 's',
-    'CLOUDFLARE': 'c',
-};
-
-function getIspSuffix(request: Request): string {
-    const cf = (request as any).cf;
-    if (!cf || !cf.asOrganization) return '';
-    const org = cf.asOrganization.toUpperCase();
-    for (const key in ispMap) {
-        if (org.includes(key)) {
-            return ispMap[key];
-        }
-    }
-    return '';
-}
+// ★★★ 修正箇所: getIspSuffix と ispMap は不要になったため削除 ★★★
 
 // --- JWT検証用のヘルパー関数群 (変更なし) ---
 let googlePublicKeys: any[] | null = null;
@@ -176,7 +153,7 @@ async function verifyFirebaseToken(token: string, env: Env): Promise<DecodedToke
         const jwk = jwks.find(key => key.kid === header.kid);
         if (!jwk) throw new Error('Public key not found for kid: ' + header.kid);
 
-        const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-26' }, false, ['verify']);
+        const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
         
         const signature = str2ab(base64UrlDecode(signatureB64));
         const data = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
@@ -196,8 +173,6 @@ async function verifyFirebaseToken(token: string, env: Env): Promise<DecodedToke
 export const onRequest: PagesFunction<Env> = async (context) => {
   const { request, data, env } = context;
 
-  // ★★★ 修正箇所 ★★★
-  // 必要な環境変数が設定されているかチェック
   if (!env.SALT_BASIC || !env.SALT_IP || !env.SALT_ACCOUNT) {
     console.error("CRITICAL: Salt environment variables are not set!");
     return new Response(
@@ -308,8 +283,7 @@ async function createThread(context: EventContext<Env, any, any>, body: { genre:
 
   const ip = request.headers.get('CF-Connecting-IP') || '127.0.0.1';
   const dateStr = new Date().toISOString().slice(0, 10);
-  const ispSuffix = getIspSuffix(request);
-
+  
   const basicIdBigInt = truncateBigInt(bufferToBigInt(await sha256(ip + dateStr + env.SALT_BASIC)), 48);
   const ipThreadIdBigInt = truncateBigInt(bufferToBigInt(await sha256(ip + newThreadId + env.SALT_IP)), 64);
   let accountThreadIdBigInt: bigint | null = null;
@@ -319,8 +293,9 @@ async function createThread(context: EventContext<Env, any, any>, body: { genre:
 
   await env.MY_D1_DATABASE2.batch([
     env.MY_D1_DATABASE2.prepare("INSERT INTO threads (id, title) VALUES (?, ?)").bind(newThreadId, title),
-    env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body, basic_id, ip_thread_id, account_thread_id, id_suffix) VALUES (?, 1, ?, ?, ?, ?, ?, ?)")
-      .bind(newThreadId, authorName, postBody, Number(basicIdBigInt), Number(ipThreadIdBigInt), accountThreadIdBigInt ? Number(accountThreadIdBigInt) : null, ispSuffix),
+    // ★★★ 修正箇所: SQL文から id_suffix を削除 ★★★
+    env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body, basic_id, ip_thread_id, account_thread_id) VALUES (?, 1, ?, ?, ?, ?, ?)")
+      .bind(newThreadId, authorName, postBody, Number(basicIdBigInt), Number(ipThreadIdBigInt), accountThreadIdBigInt ? Number(accountThreadIdBigInt) : null),
     env.MY_D1_DATABASE2.prepare("INSERT INTO threads_meta (id, title, genre, post_count, write_permission, name_setting, fixed_name) VALUES (?, ?, ?, 1, ?, ?, ?)")
       .bind(newThreadId, title, genre, write_permission, name_setting, name_setting === 'fixed' ? fixed_name : null)
   ]);
@@ -361,15 +336,12 @@ async function getPostsForThread(context: EventContext<Env, any, any>, threadId:
     posts = results;
   }
   
-  // ★★★ 修正箇所 ★★★
   const processedPosts = posts?.map(p => {
     const base64Id = numberToBase64(BigInt(p.basic_id), 6); // 48bit = 6bytes
     return {
       ...p,
-      // basic_id_display: `ID:${base64Id}${p.id_suffix || ''}`, // 末尾文字を付けないように変更
       basic_id_display: `ID:${base64Id}`,
-      basic_id: undefined, // フロントに不要なデータは送らない
-      id_suffix: undefined,
+      basic_id: undefined, 
     };
   }) ?? [];
 
@@ -410,7 +382,6 @@ async function createPost(context: EventContext<Env, any, any>, threadId: string
   
   const ip = request.headers.get('CF-Connecting-IP') || '127.0.0.1';
   const dateStr = new Date().toISOString().slice(0, 10);
-  const ispSuffix = getIspSuffix(request);
 
   const basicIdBigInt = truncateBigInt(bufferToBigInt(await sha256(ip + dateStr + env.SALT_BASIC)), 48);
   const ipThreadIdBigInt = truncateBigInt(bufferToBigInt(await sha256(ip + threadId + env.SALT_IP)), 64);
@@ -422,8 +393,10 @@ async function createPost(context: EventContext<Env, any, any>, threadId: string
   const threadInfo = await env.MY_D1_DATABASE2.prepare("UPDATE threads_meta SET post_count = post_count + 1, last_updated = CURRENT_TIMESTAMP WHERE id = ? RETURNING post_count, archived_chunk_count, genre").bind(threadId).first<{ post_count: number, archived_chunk_count: number, genre: string }>();
   if (!threadInfo) throw new Error("Failed to update thread counters.");
   const newPostCount = threadInfo.post_count;
-  await env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body, basic_id, ip_thread_id, account_thread_id, id_suffix) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(threadId, newPostCount, authorName, postBody, Number(basicIdBigInt), Number(ipThreadIdBigInt), accountThreadIdBigInt ? Number(accountThreadIdBigInt) : null, ispSuffix).run();
+  
+  // ★★★ 修正箇所: SQL文から id_suffix を削除 ★★★
+  await env.MY_D1_DATABASE2.prepare("INSERT INTO posts (thread_id, post_number, author, body, basic_id, ip_thread_id, account_thread_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .bind(threadId, newPostCount, authorName, postBody, Number(basicIdBigInt), Number(ipThreadIdBigInt), accountThreadIdBigInt ? Number(accountThreadIdBigInt) : null).run();
 
   const d1PostCount = newPostCount - (threadInfo.archived_chunk_count * CHUNK_SIZE);
   if (d1PostCount > CHUNK_SIZE) {
